@@ -1,0 +1,121 @@
+name: "A Complete Transformer for Text"
+
+layers:
+  - type: Input
+    name: "input"
+    output_size: 20
+
+  - type: Embedding
+    name: "token_embedding"
+    vocab_size: 128  # explicitly updated to match character tokenizer
+    embedding_dim: 128
+    input_size: 20
+    output_shape: [20, 128]
+
+  - type: PositionalEncoding
+    name: "positional_encoding"
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+
+  - type: MultiHeadAttention
+    name: "mha_1"
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+    num_heads: 4
+    initializer: xavier
+
+  - type: LayerNormalization
+    name: "norm_1"
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+    epsilon: 1e-5
+
+  - type: ResidualConnection
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+    name: "residual_mha"
+    from_layer: "mha_1"
+
+  - type: Flatten
+    name: "flatten_ffn"
+    input_shape: [20, 128]
+    output_size: 2560
+
+  - type: Dense
+    name: "dense_ffn_expand"
+    input_size: 2560
+    output_size: 5120
+    activation: relu
+    initializer: he
+
+  - type: Dense
+    name: "dense_ffn_reduce"
+    input_size: 5120
+    output_size: 2560
+    activation: linear
+    initializer: xavier
+
+  - type: Reshape
+    name: "reshape_ffn"
+    input_size: 2560
+    output_shape: [20, 128]
+
+  - type: LayerNormalization
+    name: "norm_ffn"
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+    epsilon: 1e-5
+
+  - type: ResidualConnection
+    name: "residual_ffn"
+    input_shape: [20, 128]
+    output_shape: [20, 128]
+    from_layer: "residual_mha"
+
+  - type: Flatten
+    name: "flatten_final"
+    input_shape: [20, 128]
+    output_size: 2560
+
+  - type: Dense
+    name: "penultimate_dense"
+    input_size: 2560
+    output_size: 1024
+    activation: relu
+    initializer: he
+
+  - type: Dense
+    name: "classification_head"
+    input_size: 1024
+    output_size: 128
+    activation: softmax
+    initializer: xavier
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.0001
+    accumulation_interval: 2
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 5
+  batch_size: 32
+
+dataset:
+  type: "text"
+  dataset_size: 100000
+  sequence_length: 20
+  samples_per_file: 5000
+  corpus_directory: "./shakespeare"
+  tokenizer:
+    type: "character"
+    parameters:
+      vocab_size: 128
+      embedding_dim: 128
+
+metadata:
+  author: "James Couch"
+  description: "A complete transformer architecture explicitly prepared for textual data, including embeddings, positional encoding, and classification head."

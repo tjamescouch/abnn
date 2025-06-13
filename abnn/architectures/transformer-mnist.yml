@@ -1,0 +1,115 @@
+name: "Transformer MNIST OCR"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [16, 49]  # 16 patches, each of 7x7 pixels
+
+  - type: Dense
+    name: "patch_embedding"
+    input_size: 49
+    output_size: 128
+    activation: relu
+    initializer: he
+
+  - type: PositionalEncoding
+    name: "positional_encoding"
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+
+  - type: MultiHeadAttention
+    name: "mha_1"
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+    num_heads: 8
+    initializer: xavier
+
+  - type: LayerNormalization
+    name: "norm_1"
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+    epsilon: 1e-5
+
+  - type: ResidualConnection
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+    name: "residual_connection1"
+    from_layer: "patch_embedding"
+    scale: 0.1
+
+  - type: Flatten
+    name: "flatten_ffn"
+    input_shape: [16, 128]
+    output_size: 2048
+
+  - type: Dense
+    name: "dense_ffn_expand"
+    input_size: 2048
+    output_size: 4096
+    activation: relu
+    initializer: he
+
+  - type: Dense
+    name: "dense_ffn_reduce"
+    input_size: 4096
+    output_size: 2048
+    activation: linear
+    initializer: xavier
+
+  - type: Reshape
+    name: "reshape_ffn"
+    input_size: 2048
+    output_shape: [16, 128]
+
+  - type: LayerNormalization
+    name: "norm_ffn"
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+    epsilon: 1e-5
+
+  - type: ResidualConnection
+    name: "residual_connection2"
+    input_shape: [16, 128]
+    output_shape: [16, 128]
+    from_layer: "residual_connection1"
+    scale: 0.1
+
+  - type: Flatten
+    name: "flatten_final"
+    input_shape: [16, 128]
+    output_size: 2048
+
+  - type: Dense
+    name: "classification_dense"
+    input_size: 2048
+    output_size: 256
+    activation: relu
+    initializer: he
+
+  - type: Dense
+    name: "classification_head"
+    input_size: 256
+    output_size: 10
+    activation: softmax
+    initializer: xavier
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.001
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 10
+  batch_size: 64
+
+dataset:
+  type: "mnist"
+  images: "train-images-idx3-ubyte"
+  labels: "train-labels-idx1-ubyte"
+
+metadata:
+  author: "James Couch"
+  description: "Corrected Transformer pipeline explicitly using patches to create meaningful sequence length for MNIST OCR."

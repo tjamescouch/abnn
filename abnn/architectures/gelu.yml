@@ -1,0 +1,56 @@
+name: "Residual Connection with LayerNorm and GELU"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [1, 256]
+    
+  - type: Dense
+    name: "input_dense"
+    input_size: 256
+    output_size: 256
+    activation: gelu
+    initializer: xavier
+
+  - type: LayerNormalization
+    name: "input_layernorm"
+    input_shape: [1, 256]
+    output_shape: [1, 256]
+    epsilon: 1e-5
+
+  - type: Dense
+    name: "ff_dense"
+    input_size: 256
+    output_size: 256
+    activation: gelu
+    initializer: xavier
+
+  - type: ResidualConnection
+    input_size: 256
+    output_size: 256
+    from_layer: "input_dense"
+
+  - type: Dense
+    name: "terminal_dense"
+    input_size: 256
+    output_size: 256
+    activation: linear
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.0001
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 5
+  batch_size: 2
+
+dataset:
+  type: "function"
+
+metadata:
+  author: "James Couch"
+  description: "Test pipeline with residual connections, LayerNorm, and GELU activation"

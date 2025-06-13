@@ -1,0 +1,41 @@
+name: "Feed Forward NN"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [1, 2560]
+    
+  - type: Dense
+    name: "dense_ffn_expand"
+    input_size: 2560
+    output_size: 5120
+    activation: relu
+    initializer: he
+
+  - type: Dense
+    name: "dense_ffn_reduce"
+    input_size: 5120
+    output_size: 2560
+    activation: linear
+    initializer: xavier
+
+training:
+  optimizer:
+    type: adam
+    accumulation_interval: 2
+    learning_rate: 0.0001
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 1
+  batch_size: 2
+
+dataset:
+  type: "function"
+
+metadata:
+  author: "James Couch"
+  description: "Feed Forward NN"
+

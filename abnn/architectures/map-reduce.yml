@@ -1,0 +1,35 @@
+name: "Dense Layer with MapReduce"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [1, 128]
+    
+  - type: Dense
+    input_size: 128
+    output_size: 64
+    activation: relu
+
+  - type: MapReduce
+    input_size: 64
+    output_size: 1
+    reduction_type: sum
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.001
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 5
+  batch_size: 500
+
+dataset:
+  type: "function"
+
+metadata:
+  author: "James Couch"
+  description: "Simple Dense followed by MapReduce (sum) for functional dataset"

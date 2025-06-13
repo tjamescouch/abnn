@@ -1,0 +1,63 @@
+name: "Sequence Aware Layers Test"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [10, 256]
+
+  - type: MultiHeadAttention
+    name: "mha"
+    input_shape: [10, 256]
+    output_shape: [10, 256]
+    num_heads: 2
+    initializer: xavier
+
+  - type: LayerNormalization
+    name: "norm_1"
+    input_shape: [10, 256]
+    output_shape: [10, 256]
+    epsilon: 1e-5
+    
+  - type: Flatten
+    name: "flatten"
+    input_shape: [10, 256]
+    output_size: 2560
+    
+  - type: Dense
+    name: "dense"
+    input_size: 2560
+    output_size: 2560
+    activation: gelu
+    initializer: he
+    
+  - type: Reshape
+    name: "reshape"
+    input_size: 2560
+    output_shape: [10, 256]
+    
+  - type: Dense
+    name: "final_dense"
+    input_size: 256
+    output_size: 256
+    activation: linear
+    initializer: xavier
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.0001
+    accumulation_interval: 4
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 5
+  batch_size: 2
+
+dataset:
+  type: "function"
+
+metadata:
+  author: "James Couch"
+  description: "Test of sequence length awareness."

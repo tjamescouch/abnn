@@ -1,0 +1,42 @@
+name: "Layer Normalization"
+
+layers:
+  - type: Input
+    name: "input"
+    output_shape: [1, 256]
+    
+  - type: Dense
+    input_size: 256
+    output_size: 256
+    activation: relu
+    initializer: he
+
+  - type: LayerNormalization
+    input_shape: [1, 256]
+    output_shape: [1, 256]
+    epsilon: 1e-5
+
+  - type: Dense
+    input_size: 256
+    output_size: 256
+    activation: linear
+    initializer: xavier
+
+training:
+  optimizer:
+    type: adam
+    learning_rate: 0.001
+    parameters:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
+
+  epochs: 5
+  batch_size: 16
+
+dataset:
+  type: "function"
+
+metadata:
+  author: "James Couch"
+  description: "Layer Normalization"
