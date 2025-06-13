@@ -41,32 +41,12 @@
 			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
 			buildPhase = DFE032AC2D72E9A000B1B6ED /* CopyFiles */;
 			membershipExceptions = (
-				"architectures/advanced-ocr.yml",
-				"architectures/feed-forward.yml",
-				architectures/gelu.yml,
-				"architectures/layer-norm.yml",
-				"architectures/map-reduce.yml",
-				"architectures/multi-dense-layer.yml",
-				"architectures/multi-head-attention.yml",
-				"architectures/ocr-complete.yml",
-				"architectures/ocr-with-batch-normalization.yml",
-				"architectures/ocr-with-dropout.yml",
-				architectures/ocr.yml,
-				architectures/passthru.yml,
-				"architectures/residual-connection.yml",
-				architectures/rnn.yml,
-				"architectures/self-attention.yml",
-				"architectures/sequence-length.yml",
-				"architectures/simple-ocr.yml",
-				"architectures/single-dense-layer.yml",
-				"architectures/transformer-complete.yml",
-				"architectures/transformer-mnist.yml",
-				architectures/transformer.yml,
 				datasets/mnist/LICENSE.txt,
 				"datasets/mnist/t10k-images-idx3-ubyte",
 				"datasets/mnist/t10k-labels-idx1-ubyte",
 				"datasets/mnist/train-images-idx3-ubyte",
 				"datasets/mnist/train-labels-idx1-ubyte",
+				manifests/simple.yml,
 			);
 		};
 /* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */

@@ -98,10 +98,9 @@ void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification
     _pWindow->makeKeyAndOrderFront( nullptr );
     
     setMenuActionHandlers(
-        [this] { this->getNeuralEngine()->runTraining(); },
-        [this] { this->getNeuralEngine()->runInference(); },
-        [this] { this->getNeuralEngine()->saveParameters(); },
-        [this] { this->getNeuralEngine()->loadParameters(); }
+        [this] { this->getBrainEngine()->run(1000); },
+        [this] { this->getBrainEngine()->saveModel("model.txt"); },
+        [this] { this->getBrainEngine()->loadModel("model.txt"); }
     );
 
     setupMenus();

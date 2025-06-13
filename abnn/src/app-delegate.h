@@ -26,9 +26,9 @@ class AppDelegate : public NS::ApplicationDelegate
         virtual void applicationDidFinishLaunching( NS::Notification* pNotification ) override;
         virtual bool applicationShouldTerminateAfterLastWindowClosed( NS::Application* pSender ) override;
     
-    NeuralEngine* getNeuralEngine() {
-        return _pViewDelegate->getNeuralEngine();
-    }
+        BrainEngine* getBrainEngine() {
+            return _pViewDelegate->getBrainEngine();
+        }
 
     private:
         NS::Window* _pWindow;

@@ -1,4 +1,18 @@
-name: "Feed Forward NN"
+name: "ABNN"
+
+neurons:  65536
+synapses: 524288
+tau_LTP:  20_000       # ns
+tau_LTD:  40_000
+alpha_LTP: 0.01
+alpha_LTD: 0.005
+w_min: 0.001
+w_max: 1.0
+steps: 1_000_000
+rng_seed: 42
+
+
+#FIXME - this is a temporary measure
 
 layers:
   - type: Input

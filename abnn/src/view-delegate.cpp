@@ -11,23 +11,11 @@
 #include <filesystem>
 #include <mach-o/dyld.h>
 #include "configuration-manager.h"
+#include "logger.h"
 
-//const char* modelFilename = "ocr.yml";
-//const char* modelFilename = "simple-ocr.yml";
-//const char* modelFilename = "ocr-with-dropout.yml";
-//const char* modelFilename = "ocr-with-batch-normalization.yml";
-//const char* modelFilename = "ocr-complete.yml";
-const char* modelFilename = "feed-forward.yml";
-//const char* modelFilename = "residual-connection.yml";
-//const char* modelFilename = "gelu.yml";
-//const char* modelFilename = "multi-dense-layer.yml";
-//const char* modelFilename = "single-dense-layer.yml";
-//const char* modelFilename = "self-attention.yml";
-//const char* modelFilename = "multi-head-attention.yml";
-//const char* modelFilename = "layer-norm.yml";
-//const char* modelFilename = "sequence-length.yml";
-//const char* modelFilename = "passthru.yml";
-// const char* modelFilename = "transformer-complete.yml";
+
+const char* modelFilename = "simple.yml";
+
 
 #pragma mark - ViewDelegate
 #pragma region ViewDelegate {
@@ -35,7 +23,7 @@ const char* modelFilename = "feed-forward.yml";
 ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 : MTK::ViewDelegate()
 , _pDevice(pDevice)
-, _pNeuralEngine(nullptr)
+, _pBrainEngine(nullptr)
 , _pDataManager(nullptr)
 {
     static ModelConfig config = ModelConfig::loadFromFile(getDefaultModelFilePath());
@@ -45,15 +33,15 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 
     _pDataManager = (new DataManager())->configure(&config);
     
-    // Instantiate NeuralEngine using the updated constructor with DataManager
-    _pNeuralEngine = new NeuralEngine(_pDevice, config, _pDataManager);
+    // Instantiate BrainEngine using the updated constructor with DataManager
+    _pBrainEngine = new BrainEngine(_pDevice);
 
-    Logger::log << "✅ NeuralEngine loaded with model: " << config.name << std::endl;
+    Logger::log << "✅ BrainEngine loaded" << std::endl;
 }
 
 ViewDelegate::~ViewDelegate()
 {
-    delete _pNeuralEngine;
+    delete _pBrainEngine;
 }
 
 void ViewDelegate::drawInMTKView(MTK::View* pView)
@@ -67,9 +55,9 @@ void ViewDelegate::drawableSizeWillChange(MTK::View* pView, CGSize size)
     // Handle resize events if needed
 }
 
-NeuralEngine* ViewDelegate::getNeuralEngine()
+BrainEngine* ViewDelegate::getBrainEngine()
 {
-    return _pNeuralEngine;
+    return _pBrainEngine;
 }
 
 std::string ViewDelegate::getDefaultModelFilePath() {

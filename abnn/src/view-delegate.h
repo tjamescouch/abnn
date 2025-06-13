@@ -11,7 +11,7 @@
 
 #include "common.h"
 #include "model-config.h"
-#include "neural-engine.h"
+#include "brain-engine.h"
 #include "data-manager.h"
 
 class ViewDelegate : public MTK::ViewDelegate {
@@ -23,12 +23,12 @@ public:
     void drawInMTKView(MTK::View* pView) override;
     void drawableSizeWillChange(MTK::View* pView, CGSize size) override;
 
-    NeuralEngine* getNeuralEngine();
+    BrainEngine* getBrainEngine();
     std::string getDefaultModelFilePath();
 
 private:
     MTL::Device* _pDevice;
-    NeuralEngine* _pNeuralEngine;
+    BrainEngine* _pBrainEngine;
     DataManager* _pDataManager;
 };
 

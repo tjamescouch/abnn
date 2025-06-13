@@ -41,15 +41,13 @@ static std::function<void()> loadParamsHandler;
 @end
 
 void setMenuActionHandlers(
-    std::function<void()> trainHandler,
-    std::function<void()> inferenceHandler,
-    std::function<void()> saveHandler,
-    std::function<void()> loadHandler
+    std::function<void()> run,
+    std::function<void()> save,
+    std::function<void()> load
 ) {
-    trainNetworkHandler = trainHandler;
-    runInferenceHandler = inferenceHandler;
-    saveParamsHandler = saveHandler;
-    loadParamsHandler = loadHandler;
+    trainNetworkHandler = run;
+    saveParamsHandler = save;
+    loadParamsHandler = load;
 }
 
 void setupMenus() {
