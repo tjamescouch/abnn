@@ -12,7 +12,7 @@
 #include "common.h"
 #include "model-config.h"
 #include "brain-engine.h"
-#include "data-manager.h"
+
 
 class ViewDelegate : public MTK::ViewDelegate {
 public:
@@ -29,7 +29,6 @@ public:
 private:
     MTL::Device* _pDevice;
     BrainEngine* _pBrainEngine;
-    DataManager* _pDataManager;
 };
 
 #endif

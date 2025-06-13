@@ -11,7 +11,7 @@
 
 int main( int argc, char* argv[] )
 {
-    Logger::log << std::filesystem::current_path() << std::endl;
+    std::cout << std::filesystem::current_path() << std::endl;
     
     NS::AutoreleasePool* pAutoreleasePool = NS::AutoreleasePool::alloc()->init();
 

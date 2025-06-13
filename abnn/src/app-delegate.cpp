@@ -112,9 +112,9 @@ void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification
     fs::path resourcePath = executablePath.parent_path().parent_path() / "Resources";
     
     setMenuActionHandlers(
-        [this] { this->getBrainEngine()->run(1000); },
-        [this, resourcePath] { this->getBrainEngine()->saveModel(resourcePath / "model.bnn"); },
-        [this, resourcePath] { this->getBrainEngine()->loadModel(resourcePath / "model.bnn"); }
+        [this] {  },
+        [this, resourcePath] { this->getBrainEngine()->save_model("model.bnn"); },
+        [this, resourcePath] { this->getBrainEngine()->load_model("model.bnn"); }
     );
 
     setupMenus();

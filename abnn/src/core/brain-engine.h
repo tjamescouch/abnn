@@ -1,56 +1,68 @@
 #pragma once
+// brain-engine.h  –  asynchronous harness driving Brain
+// ======================================================
 
 #include <Metal/Metal.hpp>
-#include <cstdint>
-#include <string>
 #include <memory>
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <string>
 
-#include "brain.h"          // ← the class we just built
+#include "brain.h"
+#include "logger.h"
 
-/*───────────────────────────────────────────────────────────────────────────────
- * BrainEngine
- *   • owns a Brain instance
- *   • handles Metal command-queue / library setup
- *   • steps the simulation for a requested number of events
- *   • triggers renormalisation when the clock nears wrap
- *   • can save / load the network state
- *─────────────────────────────────────────────────────────────────────────────*/
+// ---------------------------------------------------------------------------
+// Abstract stimulus provider (pulls one input vector each pass)
+// ---------------------------------------------------------------------------
+class StimulusProvider {
+public:
+    virtual ~StimulusProvider() = default;
+    virtual std::vector<float> next() = 0;   // length == nInput
+    virtual double             time() const = 0;
+};
+
+// ---------------------------------------------------------------------------
+// BrainEngine
+// ---------------------------------------------------------------------------
 class BrainEngine
 {
 public:
-    /* Construct an empty engine (no graph yet). */
-    BrainEngine(MTL::Device*  device,
-                uint32_t      eventsPerPass = 1'000'000);   // kernel batch size
-    ~BrainEngine();
+    BrainEngine(MTL::Device* device,
+                uint32_t     nInput,
+                uint32_t     nOutput,
+                uint32_t     eventsPerPass = 1'000'000);
+    ~BrainEngine();                                              // defined in .cpp
 
-    /* Load a .bnn file into the Brain (creates buffers if needed). */
-    bool loadModel(const std::string& path);
+    /* model I/O ----------------------------------------------------------- */
+    bool load_model(const std::string& filename = "");
+    bool save_model(const std::string& filename = "") const;
 
-    /* Save current state to a .bnn file. */
-    bool saveModel(const std::string& path) const;
+    /* runtime ------------------------------------------------------------- */
+    void set_stimulus(std::shared_ptr<StimulusProvider>);
+    std::vector<bool> run_one_pass();        // single synchronous pass
+    void start_async();                      // background loop
+    void stop_async();
+    bool is_running() const { return running_.load(); }
 
-    /* Step the simulation by (passes * eventsPerPass) Monte-Carlo events. */
-    void run(uint32_t passes);
-
-    /* Accessors */
-    Brain& brain()               { return *brain_; }
-    const Brain& brain() const   { return *brain_; }
+    uint32_t events_per_pass() const { return eventsPerPass_; }
 
 private:
-    /* Internal helpers */
-    void buildMetalObjects();
-    void ensureRenormalised(MTL::CommandBuffer* cmdBuf);
+    void build_library_and_queue();
 
-    /* Metal handles */
-    MTL::Device*             device_          { nullptr };
-    MTL::CommandQueue*       commandQueue_    { nullptr };
-    MTL::Library*            computeLibrary_  { nullptr };
-    MTL::ComputePipelineState* renormPipeline_{ nullptr };   // compiled once
+    /* Metal objects */
+    MTL::Device*       device_{nullptr};
+    MTL::CommandQueue* commandQueue_{nullptr};
+    MTL::Library*      defaultLib_{nullptr};
 
-    /* Core brain + buffers */
-    std::unique_ptr<Brain>   brain_;
-    bool                     buffersBuilt_ = false;
+    /* Core */
+    std::unique_ptr<Brain>            brain_;
+    std::unique_ptr<Logger>           logger_;
+    std::shared_ptr<StimulusProvider> stimulus_;
 
-    /* Simulation parameters */
-    uint32_t eventsPerPass_;   // kernel grid size per run() iteration
+    uint32_t nInput_{0}, nOutput_{0}, eventsPerPass_{0};
+
+    /* Async */
+    std::thread       worker_;
+    std::atomic<bool> running_{false};
 };

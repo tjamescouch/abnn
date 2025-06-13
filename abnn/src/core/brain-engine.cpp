@@ -1,153 +1,207 @@
-// brain-engine.cpp  –  Minimal harness for the ABNN “Brain”
+// brain-engine.cpp  –  asynchronous harness driving Brain
+// =======================================================
 
 #include "brain-engine.h"
-
-#include <fstream>
-#include <cassert>
-#include <iostream>
-#include <mach-o/dyld.h>
 #include <filesystem>
-#include "logger.h"
+#include <fstream>
+#include <mach-o/dyld.h>
+#include <limits.h>
+#include <iostream>
+#include <chrono>
+#include <random>
 
-using namespace std;
+namespace fs = std::filesystem;
 
-/*───────────────────────────────────────────────────────────────────────────────
- * ctor / dtor
- *─────────────────────────────────────────────────────────────────────────────*/
+// ─────────────────────────────────────────────────────────────────────────────
+// <Bundle>/Contents/Resources/<filename>  (read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+static fs::path resource_path(const std::string& filename)
+{
+    char exePath[PATH_MAX];
+    uint32_t len = sizeof(exePath);
+    if (_NSGetExecutablePath(exePath, &len) != 0)
+        throw std::runtime_error("❌ _NSGetExecutablePath buffer too small");
+    fs::path p = fs::canonical(exePath);
+    return p.parent_path().parent_path() / "Resources" / filename;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~/Library/Containers/<bundle-id>/Data/<filename>  (read-write)
+// ─────────────────────────────────────────────────────────────────────────────
+static fs::path data_path(const std::string& filename)
+{
+    return fs::current_path() / filename;          // sandbox "Data" dir
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// helper : build deterministic Input→Output fan-out + random hidden links
+// ─────────────────────────────────────────────────────────────────────────────
+static void build_random_graph(Brain& brain, uint32_t nSyn)
+{
+    std::mt19937 rng(1);
+    std::uniform_real_distribution<float> wOut(0.6f, 0.8f);
+    std::uniform_real_distribution<float> wHid(0.25f, 0.35f);
+
+    auto* syn = reinterpret_cast<SynapsePacked*>(
+                    brain.synapse_buffer()->contents());
+    uint32_t idx = 0;
+
+    // dense Input → Output
+    for (uint32_t in = 0; in < brain.n_input(); ++in)
+        for (uint32_t out = 0; out < brain.n_output() && idx < nSyn; ++out)
+            syn[idx++] = { in, brain.n_input() + out, wOut(rng), 0.f };
+
+    // remaining hidden↔hidden
+    std::uniform_int_distribution<uint32_t> hid(
+        brain.n_input() + brain.n_output(), brain.n_neuron() - 1);
+    while (idx < nSyn)
+        syn[idx++] = { hid(rng), hid(rng), wHid(rng), 0.f };
+
+    brain.synapse_buffer()->didModifyRange(
+        NS::Range(0, nSyn * sizeof(SynapsePacked)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 BrainEngine::BrainEngine(MTL::Device* device,
+                         uint32_t     nInput,
+                         uint32_t     nOutput,
                          uint32_t     eventsPerPass)
 : device_(device->retain())
+, nInput_(nInput)
+, nOutput_(nOutput)
 , eventsPerPass_(eventsPerPass)
-, commandQueue_(device_->newCommandQueue())
 {
-    buildMetalObjects();
+    /* 1. Metal queue & library */
+    build_library_and_queue();
+
+    /* 2. Create brain core */
+    constexpr uint32_t N_HIDDEN = 99;
+    constexpr uint32_t N_SYN    = 300;
+
+    brain_ = std::make_unique<Brain>(nInput_, nOutput_,
+                                     N_HIDDEN, N_SYN, eventsPerPass_);
+    brain_->build_pipeline(device_, defaultLib_);
+    brain_->build_buffers (device_);
+
+    /* 3. Logger */
+    logger_ = std::make_unique<Logger>(nInput_, nOutput_);
+
+    /* 4. Load or build graph */
+    if (!load_model()) {
+        std::cout << "🆕  Building random graph…\n";
+        build_random_graph(*brain_, N_SYN);
+        save_model();        // save to writable container path
+    }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 BrainEngine::~BrainEngine()
 {
-    if (commandQueue_)   commandQueue_->release();
-    if (computeLibrary_) computeLibrary_->release();
-    if (device_)         device_->release();
-    if (renormPipeline_) renormPipeline_->release();
+    stop_async();
+    if (commandQueue_) commandQueue_->release();
+    if (defaultLib_)   defaultLib_->release();
+    if (device_)       device_->release();
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- * Metal setup
- *─────────────────────────────────────────────────────────────────────────────*/
-void BrainEngine::buildMetalObjects()
+// ─────────────────────────────────────────────────────────────────────────────
+void BrainEngine::build_library_and_queue()
 {
-    namespace fs = std::filesystem;
-    
-    computeLibrary_ = device_->newDefaultLibrary();
-    assert(computeLibrary_ && "Failed to load default .metallib");
+    commandQueue_ = device_->newCommandQueue();
+    defaultLib_   = device_->newDefaultLibrary();
+    assert(defaultLib_);
+}
 
-    /*  Compile renormalisation pipeline once  */
-    auto fn = computeLibrary_->newFunction(
-        NS::String::string("renormalise_clock_and_times", NS::UTF8StringEncoding));
-    assert(fn && "missing renormalise_clock_and_times() in brain.metal");
+// ─────────────────────────────────────────────────────────────────────────────
+bool BrainEngine::load_model(const std::string& name)
+{
+    fs::path fileRW = data_path(name.empty() ? "model.bnn" : name);
+    fs::path fileRO = resource_path("model.bnn");
+    fs::path file   = fs::exists(fileRW) ? fileRW : fileRO;
+    if (!fs::exists(file)) return false;
 
-    NS::Error* err = nullptr;
-    renormPipeline_ = device_->newComputePipelineState(fn, &err);
-    assert(renormPipeline_ && "failed to create renorm pipeline");
-    fn->release();
-    
-    char path[PATH_MAX];
-    uint32_t size = sizeof(path);
-    if (_NSGetExecutablePath(path, &size) != 0) {
-        throw std::runtime_error("❌ Executable path buffer too small.");
+    std::ifstream is(file, std::ios::binary);
+    if (!is) { std::cerr << "❌ cannot open " << file << '\n'; return false; }
+
+    uint32_t syn{}, nrn{};
+    is.read(reinterpret_cast<char*>(&syn),4);
+    is.read(reinterpret_cast<char*>(&nrn),4);
+
+    uint32_t expect = nInput_ + nOutput_ +
+                      (nrn > nInput_ + nOutput_ ? nrn - (nInput_+nOutput_) : 0);
+    if (nrn != expect) {
+        std::cerr << "⚠️  model neuron-count mismatch → ignore.\n";
+        return false;
     }
-    
-    fs::path executablePath = fs::canonical(path);
-    fs::path resourcePath = executablePath.parent_path().parent_path() / "Resources" / "model.bnn";
-    
-    this->loadModel(resourcePath);
-}
-
-/*───────────────────────────────────────────────────────────────────────────────
- * Model I/O
- *─────────────────────────────────────────────────────────────────────────────*/
-bool BrainEngine::loadModel(const string& path)
-{
-    ifstream is(path, ios::binary);
-    if (!is) { cerr << "❌  Could not open " << path << endl; return false; }
-
-    /*  Peek at the header to know graph size  */
-    uint32_t nSyn=0, nNrn=0;
-    is.read(reinterpret_cast<char*>(&nSyn), sizeof(nSyn));
-    is.read(reinterpret_cast<char*>(&nNrn), sizeof(nNrn));
-    if (!is) { cerr << "❌  Corrupt header in " << path << endl; return false; }
-    is.seekg(0);                              // rewind
-
-    /*  Build Brain object if needed / shape changed  */
-    brain_ = make_unique<Brain>(nNrn, nSyn, eventsPerPass_);
-    brain_->buildPipeline(device_, computeLibrary_);
-    brain_->buildBuffers(device_);
+    is.seekg(0);
     brain_->load(is);
-    buffersBuilt_ = true;
-
-    cout << "✅  Loaded model '" << path
-         << "'  (neurons=" << nNrn << ", synapses=" << nSyn << ")\n";
+    std::cout << "✅ loaded model (" << (file==fileRW?"Data":"Resources") << ")\n";
     return true;
 }
 
-bool BrainEngine::saveModel(const string& path) const
+// ─────────────────────────────────────────────────────────────────────────────
+bool BrainEngine::save_model(const std::string& name) const
 {
-    if (!brain_) { cerr << "❌  No brain to save\n"; return false; }
-    ofstream os(path, ios::binary);
-    if (!os) { cerr << "❌  Could not open " << path << " for writing\n"; return false; }
+    fs::path p = data_path(name.empty() ? "model.bnn" : name);
+    std::ofstream os(p, std::ios::binary);
+    if (!os) { std::cerr << "❌ cannot write " << p << '\n'; return false; }
     brain_->save(os);
-    cout << "💾  Saved model to " << path << endl;
+    std::cout << "💾 saved model → " << p << '\n';
     return true;
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- * Run network
- *─────────────────────────────────────────────────────────────────────────────*/
-void BrainEngine::run(uint32_t passes)
+// ─────────────────────────────────────────────────────────────────────────────
+void BrainEngine::set_stimulus(std::shared_ptr<StimulusProvider> s)
 {
-    assert(buffersBuilt_ && "loadModel() needs to be called first");
-
-    uint32_t hostTick = 0;   // mirror of GPU clock (32-bit, wraps like GPU)
-
-    Logger::log << "🔋 Running network" << std::endl;
-    for (uint32_t p = 0; p < passes; ++p)
-    {
-        auto cmdBuf = commandQueue_->commandBuffer();
-
-        /* 1) Monte-Carlo traversal for `eventsPerPass_` events */
-        brain_->step(cmdBuf);
-        hostTick += eventsPerPass_;           // mirror the GPU increment
-
-        /* 2) If we’re near wrap, append renorm kernel */
-        if (hostTick > Brain::kRenormThreshold)
-        {
-            ensureRenormalised(cmdBuf);       // encode kernel
-            hostTick = 0;                     // host mirror also reset
-        }
-
-        cmdBuf->commit();
-        cmdBuf->waitUntilCompleted();
-    }
+    stimulus_ = std::move(s);
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- * Append renormalisation kernel to a command buffer
- *─────────────────────────────────────────────────────────────────────────────*/
-void BrainEngine::ensureRenormalised(MTL::CommandBuffer* cmdBuf)
+// ─────────────────────────────────────────────────────────────────────────────
+std::vector<bool> BrainEngine::run_one_pass()
 {
-    auto enc = cmdBuf->computeCommandEncoder();
-    enc->setComputePipelineState(renormPipeline_);
+    if (!stimulus_) return {};
 
-    enc->setBuffer(brain_->lastFiredBuffer(),   0, 0);
-    enc->setBuffer(brain_->lastVisitedBuffer(), 0, 1);
-    enc->setBuffer(brain_->clockBuffer(),       0, 2);
-    uint32_t nNeurons = brain_->neuronCount();
-    enc->setBytes(&nNeurons, sizeof(uint32_t),  3);
+    /* 1. inject drive ----------------------------------------------------- */
+    std::vector<float> target = stimulus_->next();             // nInput
+    brain_->inject_inputs(target, /*Hz*/ 5'000.0f);
 
-    /* Thread-grid: one thread per neuron */
-    const uint32_t tgWidth = 256;
-    MTL::Size tgSize(tgWidth,1,1);
-    MTL::Size grid((nNeurons + tgWidth - 1) / tgWidth * tgWidth, 1,1);
-    enc->dispatchThreads(grid, tgSize);
-    enc->endEncoding();
+    /* 2. GPU traversal ---------------------------------------------------- */
+    auto cb = commandQueue_->commandBuffer();
+    brain_->encode_traversal(cb);
+    cb->commit();
+    cb->waitUntilCompleted();
+
+    /* 3. read outputs ----------------------------------------------------- */
+    std::vector<bool> b = brain_->read_outputs();
+    std::vector<float> pred(nOutput_);
+    for (size_t i=0;i<nOutput_; ++i) pred[i] = b[i] ? 1.f : 0.f;
+
+    /* 4. log -------------------------------------------------------------- */
+    logger_->log_samples(target, pred);
+
+    static uint32_t step = 0;
+    if (++step % 1000 == 0) logger_->flush_to_matlab();
+
+    return b;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void BrainEngine::start_async()
+{
+    if (running_.load() || !stimulus_) return;
+    running_.store(true);
+    worker_ = std::thread([this]{
+        while (running_.load()) {
+            run_one_pass();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    std::cout << "▶️  Engine async loop started\n";
+}
+
+void BrainEngine::stop_async()
+{
+    if (!running_.load()) return;
+    running_.store(false);
+    if (worker_.joinable()) worker_.join();
+    std::cout << "⏹️  Engine async loop stopped\n";
 }

@@ -50,7 +50,7 @@ std::vector<int> CharacterTokenizer::tokenize(const std::string& text) const {
         if (it != char2idx_.end()) {
             tokens.push_back(it->second);
         } else {
-            Logger::log << "Character not in vocabulary: " << c << std::endl;
+            std::cout << "Character not in vocabulary: " << c << std::endl;
             
             tokens.push_back(char2idx_.find('?')->second);
         }

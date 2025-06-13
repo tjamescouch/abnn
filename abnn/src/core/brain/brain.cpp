@@ -1,4 +1,5 @@
-// brain.cpp  –  ABNN core (CPU ⇄ GPU bridge)
+// brain.cpp  –  core event-driven ABNN implementation
+// ===================================================
 
 #include "brain.h"
 
@@ -6,191 +7,188 @@
 #include <cassert>
 #include <cstring>
 #include <random>
+#include <cmath>
+#include <algorithm>
 #include <iostream>
 
-/*───────────────────────────────────────────────────────────────────────────────
- *  Helpers
- *─────────────────────────────────────────────────────────────────────────────*/
-static constexpr uint32_t THREADGROUP_SIZE = 256;   // good default for Apple GPUs
-
-/*───────────────────────────────────────────────────────────────────────────────
- *  ctor / dtor
- *─────────────────────────────────────────────────────────────────────────────*/
-Brain::Brain(uint32_t neurons,
-             uint32_t synapses,
+// ─────────────────────────────────────────────────────────────────────────────
+// ctor / dtor
+// ─────────────────────────────────────────────────────────────────────────────
+Brain::Brain(uint32_t nInput,
+             uint32_t nOutput,
+             uint32_t nHidden,
+             uint32_t nSynapses,
              uint32_t eventsPerPass)
-: N_NRN_(neurons)
-, N_SYN_(synapses)
-, eventsPerPass_(eventsPerPass)
-, hostSynapses_(synapses)
+: N_INPUT_(nInput)
+, N_OUTPUT_(nOutput)
+, N_HIDDEN_(nHidden)
+, N_NRN_(nInput + nOutput + nHidden)
+, N_SYN_(nSynapses)
+, EVENTS_(eventsPerPass)
+, hostSyn_(nSynapses)
 {}
 
-Brain::~Brain()
-{
-    /*  Metal resources – release only if non-null  */
-    auto safeRelease = [](auto*& p) { if (p) { p->release(); p = nullptr; } };
+Brain::~Brain() { release_all(); }
 
-    safeRelease(bufferSynapses_);
-    safeRelease(bufferLastFired_);
-    safeRelease(bufferLastVisited_);
-    safeRelease(bufferClock_);
-    safeRelease(bufferRngStates_);
-    safeRelease(mcPipeline_);
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::release_all()
+{
+    auto rel = [](auto*& p){ if (p){ p->release(); p=nullptr; } };
+    rel(bufSyn_); rel(bufLastFire_); rel(bufLastVisit_);
+    rel(bufClock_); rel(bufRng_);
+    rel(pipeTraverse_); rel(pipeRenorm_);
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- *  Pipeline & buffer allocation
- *─────────────────────────────────────────────────────────────────────────────*/
-void Brain::buildPipeline(MTL::Device* device, MTL::Library* library)
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::build_pipeline(MTL::Device* dev, MTL::Library* lib)
 {
-    /*  Lookup Metal function  */
-    auto fn = library->newFunction(NS::String::string("monte_carlo_traversal",
-                                                      NS::UTF8StringEncoding));
-    assert(fn && "Metal function monte_carlo_traversal not found");
-
     NS::Error* err = nullptr;
-    mcPipeline_ = device->newComputePipelineState(fn, &err);
-    assert(mcPipeline_ && "Failed to create compute pipeline");
+    auto fTrav = lib->newFunction(
+        NS::String::string("monte_carlo_traversal", NS::UTF8StringEncoding));
+    pipeTraverse_ = dev->newComputePipelineState(fTrav, &err);
+    fTrav->release();
 
-    fn->release();
+    auto fRen = lib->newFunction(
+        NS::String::string("renormalise_clock_and_times", NS::UTF8StringEncoding));
+    pipeRenorm_ = dev->newComputePipelineState(fRen, &err);
+    fRen->release();
 }
 
-void Brain::buildBuffers(MTL::Device* device)
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::build_buffers(MTL::Device* dev)
 {
-    /*──────────────── Synapses (SoA packed) ────────────────*/
+    // Synapses in managed mode (GPU-only after init)
     size_t synBytes = N_SYN_ * sizeof(SynapsePacked);
-    bufferSynapses_ = device->newBuffer(synBytes, MTL::ResourceStorageModeManaged);
-    std::memcpy(bufferSynapses_->contents(), hostSynapses_.data(), synBytes);
-    bufferSynapses_->didModifyRange(NS::Range(0, synBytes));
+    bufSyn_ = dev->newBuffer(synBytes, MTL::ResourceStorageModeManaged);
+    std::memset(bufSyn_->contents(), 0, synBytes);
 
-    /*──────────────── Per-neuron timing ────────────────*/
-    size_t timingBytes = N_NRN_ * sizeof(uint64_t);
-    bufferLastFired_   = device->newBuffer(timingBytes, MTL::ResourceStorageModeManaged);
-    bufferLastVisited_ = device->newBuffer(timingBytes, MTL::ResourceStorageModeManaged);
-    std::memset(bufferLastFired_->contents(),   0, timingBytes);
-    std::memset(bufferLastVisited_->contents(), 0, timingBytes);
-    bufferLastFired_->didModifyRange  (NS::Range(0, timingBytes));
-    bufferLastVisited_->didModifyRange(NS::Range(0, timingBytes));
+    // Per-neuron times in SHARED mode for free CPU-GPU coherence
+    size_t nBytes = N_NRN_ * sizeof(uint32_t);
+    bufLastFire_  = dev->newBuffer(nBytes, MTL::ResourceStorageModeShared);
+    bufLastVisit_ = dev->newBuffer(nBytes, MTL::ResourceStorageModeShared);
+    std::memset(bufLastFire_->contents(),  0, nBytes);
+    std::memset(bufLastVisit_->contents(), 0, nBytes);
 
-    /*──────────────── Global clock ────────────────*/
-    bufferClock_ = device->newBuffer(sizeof(uint64_t), MTL::ResourceStorageModeManaged);
-    *reinterpret_cast<uint64_t*>(bufferClock_->contents()) = 0;
-    bufferClock_->didModifyRange(NS::Range(0, sizeof(uint64_t)));
+    // Global clock in SHARED mode
+    bufClock_ = dev->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    *reinterpret_cast<uint32_t*>(bufClock_->contents()) = 0;
 
-    /*──────────────── RNG seeds (one per event) ────────────────*/
-    size_t rngBytes = eventsPerPass_ * sizeof(uint32_t);
-    bufferRngStates_ = device->newBuffer(rngBytes, MTL::ResourceStorageModeManaged);
-    {
-        std::mt19937 rng(42);
-        auto* seeds = reinterpret_cast<uint32_t*>(bufferRngStates_->contents());
-        for (uint32_t i = 0; i < eventsPerPass_; ++i) seeds[i] = rng();
-    }
-    bufferRngStates_->didModifyRange(NS::Range(0, rngBytes));
+    // RNG seeds (managed, GPU-only)
+    bufRng_ = dev->newBuffer(EVENTS_ * sizeof(uint32_t),
+                             MTL::ResourceStorageModeManaged);
+    std::mt19937 rng(123);
+    uint32_t* p = reinterpret_cast<uint32_t*>(bufRng_->contents());
+    for (uint32_t i=0;i<EVENTS_;++i) p[i] = rng();
+    bufRng_->didModifyRange(NS::Range(0, EVENTS_*sizeof(uint32_t)));
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- *  GPU step  –  advance simulation by eventsPerPass_ events
- *─────────────────────────────────────────────────────────────────────────────*/
-void Brain::step(MTL::CommandBuffer* cmdBuf)
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::encode_traversal(MTL::CommandBuffer* cb)
 {
-    assert(mcPipeline_ && "Pipeline not built");
-    auto enc = cmdBuf->computeCommandEncoder();
-    enc->setComputePipelineState(mcPipeline_);
+    auto enc = cb->computeCommandEncoder();
+    enc->setComputePipelineState(pipeTraverse_);
 
-    /*  Buffer bindings mirror the kernel signature  */
-    enc->setBuffer(bufferSynapses_,    0, 0);
-    enc->setBuffer(bufferLastFired_,   0, 1);
-    enc->setBuffer(bufferLastVisited_, 0, 2);
-    enc->setBuffer(bufferClock_,       0, 3);
+    enc->setBuffer(bufSyn_,       0, 0);
+    enc->setBuffer(bufLastFire_,  0, 1);
+    enc->setBuffer(bufLastVisit_, 0, 2);
+    enc->setBuffer(bufClock_,     0, 3);
 
-    enc->setBytes(&N_SYN_,        sizeof(uint32_t), 4);     // constant uint& N_SYN
-    uint32_t tauPrePost = 20'000;                           // ns
-    uint32_t tauVisit   = 40'000;                           // ns
-    float    alphaLTP   = 0.01f;
-    float    alphaLTD   = 0.005f;
-    float    wMin       = 0.001f;
-    float    wMax       = 1.0f;
-    enc->setBytes(&tauPrePost, sizeof(uint32_t), 5);
-    enc->setBytes(&tauVisit,   sizeof(uint32_t), 6);
-    enc->setBytes(&alphaLTP,   sizeof(float),    7);
-    enc->setBytes(&alphaLTD,   sizeof(float),    8);
-    enc->setBytes(&wMin,       sizeof(float),    9);
-    enc->setBytes(&wMax,       sizeof(float),    10);
-    enc->setBuffer(bufferRngStates_, 0, 11);
+    enc->setBytes(&N_SYN_, sizeof(uint32_t), 4);
 
-    /*  Dispatch  */
-    uint32_t threads  = eventsPerPass_;
-    uint32_t tgWidth  = THREADGROUP_SIZE;
-    uint32_t groups   = (threads + tgWidth - 1) / tgWidth;
-    MTL::Size tgSize  (tgWidth, 1, 1);
-    MTL::Size gridSize(groups * tgWidth, 1, 1);   // full multiples for simplicity
-    enc->dispatchThreads(gridSize, tgSize);
+    uint32_t tauVis = 4000, tauPre = 2000;
+    enc->setBytes(&tauVis, sizeof(uint32_t), 5);
+    enc->setBytes(&tauPre, sizeof(uint32_t), 6);
+
+    float aLTP = 0.01f, aLTD = 0.005f, wMin = 0.001f, wMax = 1.0f;
+    enc->setBytes(&aLTP, sizeof(float), 7);
+    enc->setBytes(&aLTD, sizeof(float), 8);
+    enc->setBytes(&wMin, sizeof(float), 9);
+    enc->setBytes(&wMax, sizeof(float),10);
+
+    enc->setBuffer(bufRng_, 0, 11);
+
+    const uint tg = 256;
+    MTL::Size tgSize(tg,1,1);
+    MTL::Size grid(((EVENTS_+tg-1)/tg)*tg,1,1);
+    enc->dispatchThreads(grid, tgSize);
     enc->endEncoding();
 
-    /*  Mark buffers modified so CPU view stays coherent (managed mode)  */
-    bufferSynapses_->didModifyRange(NS::Range(0, bufferSynapses_->length()));
-    bufferLastFired_->didModifyRange(NS::Range(0, bufferLastFired_->length()));
-    bufferLastVisited_->didModifyRange(NS::Range(0, bufferLastVisited_->length()));
-    bufferClock_->didModifyRange(NS::Range(0, sizeof(uint64_t)));
+    renormalise_if_needed(cb);
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- *  CPU reference loop – optional debugging aid
- *─────────────────────────────────────────────────────────────────────────────*/
-void Brain::stepCPU(size_t iterations)
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::renormalise_if_needed(MTL::CommandBuffer* cb)
 {
-    uint64_t now     = 0;
-    std::vector<uint64_t> lastFired  (N_NRN_, 0);
-    std::vector<uint64_t> lastVisited(N_NRN_, 0);
-    std::mt19937 rng(123);
-    std::uniform_int_distribution<uint32_t> edgeDist(0, N_SYN_ - 1);
-    std::uniform_real_distribution<float>   uni(0.0f, 1.0f);
+    uint32_t now = *reinterpret_cast<uint32_t*>(bufClock_->contents());
+    if (now <= kRenormThreshold) return;
 
-    constexpr uint32_t tauPrePost = 20'000;
-    constexpr uint32_t tauVisit   = 40'000;
-    constexpr float    alphaLTP   = 0.01f;
-    constexpr float    alphaLTD   = 0.005f;
+    auto enc = cb->computeCommandEncoder();
+    enc->setComputePipelineState(pipeRenorm_);
+    enc->setBuffer(bufLastFire_,   0, 0);
+    enc->setBuffer(bufLastVisit_,  0, 1);
+    enc->setBuffer(bufClock_,      0, 2);
+    enc->setBytes(&N_NRN_, sizeof(uint32_t), 3);
 
-    for (size_t step = 0; step < iterations; ++step, ++now)
-    {
-        auto& e = hostSynapses_[edgeDist(rng)];
-        uint32_t src = e.src, dst = e.dst;
-        uint64_t dtSpike = now - lastFired[src];
-        uint64_t dtVisit = now - lastVisited[dst];
-
-        float visitFactor = std::exp(-float(dtVisit) / float(tauVisit));
-        if (dtSpike < tauPrePost && e.w * visitFactor > uni(rng))
-        {
-            /*  Fire  */
-            lastFired[dst] = now;
-            if (dtSpike < tauPrePost)
-                e.w += alphaLTP * (1.0f - e.w);
-            else
-                e.w -= alphaLTD * e.w;
-            e.w = std::clamp(e.w, 0.001f, 1.0f);
-        }
-        lastVisited[dst] = now;
-    }
+    const uint tg = 256;
+    MTL::Size tgSize(tg,1,1);
+    MTL::Size grid(((N_NRN_+tg-1)/tg)*tg,1,1);
+    enc->dispatchThreads(grid, tgSize);
+    enc->endEncoding();
 }
 
-/*───────────────────────────────────────────────────────────────────────────────
- *  Save / load
- *─────────────────────────────────────────────────────────────────────────────*/
+// ─────────────────────────────────────────────────────────────────────────────
+void Brain::inject_inputs(const std::vector<float>& analogue, float poissonHz)
+{
+    assert(analogue.size() == N_INPUT_);
+    float pTick = poissonHz * kTickNS * 1e-9f;
+
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> uni(0.f,1.f);
+
+    uint32_t* last = reinterpret_cast<uint32_t*>(bufLastFire_->contents());
+    uint32_t  now  = *reinterpret_cast<uint32_t*>(bufClock_->contents());
+
+    for (uint32_t i=0;i<N_INPUT_;++i)
+        if (uni(rng) < pTick * analogue[i])
+            last[i] = now;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+std::vector<bool> Brain::read_outputs() const
+{
+    std::vector<bool> fired(N_OUTPUT_, false);
+
+    const uint32_t* last = reinterpret_cast<const uint32_t*>(bufLastFire_->contents());
+    uint32_t now = *reinterpret_cast<const uint32_t*>(bufClock_->contents());
+
+    uint32_t window = EVENTS_ * 10;                // 10-pass window
+    uint32_t start  = now >= window ? now - window : 0;
+
+    for (uint32_t o=0;o<N_OUTPUT_;++o) {
+        uint32_t ts = last[N_INPUT_ + o];
+        if (ts >= start && ts < now) fired[o] = true;
+    }
+    return fired;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// save / load (unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 void Brain::save(std::ostream& os) const
 {
-    /*  Header  */
-    os.write(reinterpret_cast<const char*>(&N_SYN_), sizeof(N_SYN_));
-    os.write(reinterpret_cast<const char*>(&N_NRN_), sizeof(N_NRN_));
-    /*  Arrays  */
-    os.write(reinterpret_cast<const char*>(hostSynapses_.data()),
-             hostSynapses_.size() * sizeof(SynapsePacked));
+    os.write(reinterpret_cast<const char*>(&N_SYN_), sizeof(uint32_t));
+    os.write(reinterpret_cast<const char*>(&N_NRN_), sizeof(uint32_t));
+    os.write(reinterpret_cast<const char*>(bufSyn_->contents()),
+             N_SYN_ * sizeof(SynapsePacked));
 }
 
 void Brain::load(std::istream& is)
 {
-    is.read(reinterpret_cast<char*>(&N_SYN_), sizeof(N_SYN_));
-    is.read(reinterpret_cast<char*>(&N_NRN_), sizeof(N_NRN_));
-    hostSynapses_.resize(N_SYN_);
-    is.read(reinterpret_cast<char*>(hostSynapses_.data()),
-            hostSynapses_.size() * sizeof(SynapsePacked));
+    uint32_t syn=0,nrn=0;
+    is.read(reinterpret_cast<char*>(&syn),4);
+    is.read(reinterpret_cast<char*>(&nrn),4);
+    assert(syn==N_SYN_ && nrn==N_NRN_);
+    is.read(reinterpret_cast<char*>(bufSyn_->contents()),
+            N_SYN_*sizeof(SynapsePacked));
+    bufSyn_->didModifyRange(NS::Range(0, N_SYN_*sizeof(SynapsePacked)));
 }

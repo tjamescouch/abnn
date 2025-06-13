@@ -1,93 +1,58 @@
-#ifndef LOGGER_H
-#define LOGGER_H
+#pragma once
+// logger.h  –  dynamic-length trace logger for ABNN
+// -----------------------------------------------------------------
+// • Works with any N_INPUT / N_OUTPUT sent at construction time.
+// • Keeps up to windowIn_ / windowOut_ most recent samples.
+// • log_samples(targetVec, predictionVec)  ← whole vectors
+// • flush_to_matlab() writes/overwrites "abnn_session.m"
+//   which plots the rolling traces and then pauses so the
+//   window stays open.
+//
+// Compile as C++17.
+// -----------------------------------------------------------------
 
-#include <string>
+#include <deque>
 #include <vector>
+#include <fstream>
 #include <mutex>
-#include <functional>
-#include <sstream>
 
-namespace MTL {
-class Buffer;
-}
-
-class Logger {
+class Logger
+{
 public:
-    static Logger& instance();
-    
-    void clear();
-    
-    void logAnalytics(const float* output, int outputCount,
-                      const float* target, int targetCount,
-                      const uint sequenceLength);
-    
-    void logMSE(float* targetData, float* outputData, int dimension);
-    void logCrossEntropyLoss(float* targetData, float* outputData, int dimension);
+    Logger(size_t nIn,
+           size_t nOut,
+           size_t windowIn  = 256,
+           size_t windowOut = 128,
+           float  emaAlpha  = 0.01f);
 
-    void logLoss(float loss);
-    void accumulateLoss(float loss, int currentBatchSize);
-    void finalizeBatchLoss();
-    
-    void addSample(const float* prediction, const float* target);
+    // copy-disabled
+    Logger(const Logger&)            = delete;
+    Logger& operator=(const Logger&) = delete;
 
-    void flushAnalytics(const uint sequenceLength);
-    
-    void clearBatchData();
-    void flushBatchData();
-    void setBatchSize(int batchSize);
-    void setIsRegression(bool isRegression) { isRegression_ = isRegression; }
-    
-    void printFloatBuffer(MTL::Buffer* b, std::string message);
-    void printFloatBuffer(MTL::Buffer* b, std::string message, int maxElements);
-    
-    void printFloatBufferL2Norm(MTL::Buffer* b, std::string message);
-    void printFloatBufferMeanL2Norm(MTL::Buffer* b, std::string message);
-    
-    void assertBufferContentsAreValid(MTL::Buffer* b, std::string layerName);
-    
-    void count(MTL::Buffer* b, std::string message, std::function<bool(float)> predicate);
-    
-    static Logger log;
+    // push one full sample vector
+    void log_samples(const std::vector<float>& target,
+                     const std::vector<float>& prediction);
 
-    template <typename T>
-    Logger& operator<<(const T& msg) {
-        _stream << msg;
-        return *this;
-    }
+    // write/refresh abnn_session.m
+    void flush_to_matlab();
 
-    typedef std::ostream& (*Manipulator)(std::ostream&);
-    Logger& operator<<(Manipulator manip) {
-        manip(_stream);
-        flush();
-        return *this;
-    }
+    // current EMA loss
+    float ema_loss() const { return emaLoss_; }
 
-    
 private:
-    void flushRegressionAnalytics(const uint sequenceLength);
-    void flushClassificationAnalytics();
-    
-    bool isRegression_ = true;
-    float accumulatedLoss_ = 0.0f;
-    int numSamples_ = 0;
-    int batchSize_ = 1;
-    
-    std::ofstream *logFileStream = nullptr;
-    std::string filename_;
-    
-    std::vector<std::vector<float>> batchOutputs_;
-    std::vector<std::vector<float>> batchTargets_;
-    int outputDim_;
+    // ring buffers
+    std::deque<std::vector<float>> inBuf_;
+    std::deque<std::vector<float>> outBuf_;
+    size_t  winIn_, winOut_;
 
-    Logger();
-    ~Logger();
-    static void initSingleton();
-    
-    static Logger* instance_;
-    static std::once_flag initInstanceFlag;
-    
-    std::stringstream _stream;
-    void flush();
+    // dims
+    size_t  nIn_, nOut_;
+
+    // loss
+    float emaLoss_;
+    float alpha_;
+
+    // file + mutex
+    std::ofstream matFile_;
+    std::mutex    mtx_;
 };
-
-#endif // LOGGER_H

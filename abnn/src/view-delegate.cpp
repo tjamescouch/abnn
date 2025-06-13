@@ -5,6 +5,7 @@
 //  Created by James Couch on 2024-12-07.
 //
 
+#include "brain-engine.h"
 #include "view-delegate.h"
 #include "model-config.h"
 #include <iostream>
@@ -12,7 +13,7 @@
 #include <mach-o/dyld.h>
 #include "configuration-manager.h"
 #include "logger.h"
-
+#include "functional-dataset.h"
 
 const char* modelFilename = "simple.yml";
 
@@ -24,19 +25,22 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 : MTK::ViewDelegate()
 , _pDevice(pDevice)
 , _pBrainEngine(nullptr)
-, _pDataManager(nullptr)
 {
-    static ModelConfig config = ModelConfig::loadFromFile(getDefaultModelFilePath());
-    config.filename = modelFilename;
-    
-    ConfigurationManager::instance().setConfig(&config);
+    _pBrainEngine = new BrainEngine(_pDevice, 256, 128);
 
-    _pDataManager = (new DataManager())->configure(&config);
-    
-    // Instantiate BrainEngine using the updated constructor with DataManager
-    _pBrainEngine = new BrainEngine(_pDevice);
+    // 1-Hz sine stimulus: f(t) = sin(2π·1·t), sample once per pass
+    double dt = Brain::kTickNS * _pBrainEngine->events_per_pass() * 1e-9; // seconds/pass
 
-    Logger::log << "✅ BrainEngine loaded" << std::endl;
+
+    
+    auto stim = std::make_shared<FunctionalDataset>(
+                    /*nInput=*/256,
+                    /*dtSec =*/ dt,
+                    /*freqHz=*/1.0);
+    _pBrainEngine->set_stimulus(stim);
+    _pBrainEngine->start_async();
+
+    std::cout << "✅ BrainEngine loaded" << std::endl;
 }
 
 ViewDelegate::~ViewDelegate()
@@ -75,7 +79,7 @@ std::string ViewDelegate::getDefaultModelFilePath() {
     if (!fs::exists(resourcePath)) {
         throw std::runtime_error("❌ Could not find configuration yml at " + resourcePath.string());
     }
-    Logger::log << "📂 Loaded file " << modelFilename << std::endl;
+    std::cout << "📂 Loaded file " << modelFilename << std::endl;
 
     return resourcePath.string();
 }
