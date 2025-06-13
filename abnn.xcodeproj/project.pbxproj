@@ -47,6 +47,7 @@
 				"datasets/mnist/train-images-idx3-ubyte",
 				"datasets/mnist/train-labels-idx1-ubyte",
 				manifests/simple.yml,
+				models/model.bnn,
 			);
 		};
 /* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */

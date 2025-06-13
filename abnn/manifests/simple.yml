@@ -1,4 +1,4 @@
-name: "ABNN"
+name: "abnn"
 
 neurons:  65536
 synapses: 524288
@@ -51,5 +51,5 @@ dataset:
 
 metadata:
   author: "James Couch"
-  description: "Feed Forward NN"
+  description: "abnn"
 

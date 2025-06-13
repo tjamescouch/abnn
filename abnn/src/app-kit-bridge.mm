@@ -9,7 +9,6 @@
 #include "app-kit-bridge.h"
 
 static std::function<void()> trainNetworkHandler;
-static std::function<void()> runInferenceHandler;
 static std::function<void()> saveParamsHandler;
 static std::function<void()> loadParamsHandler;
 
@@ -20,10 +19,6 @@ static std::function<void()> loadParamsHandler;
 @implementation AppMenuHandler
 - (void)trainNetwork:(id)sender {
     if (trainNetworkHandler) trainNetworkHandler();
-}
-
-- (void)runInference:(id)sender {
-    if (runInferenceHandler) runInferenceHandler();
 }
 
 - (void)saveParameters:(id)sender {
@@ -75,17 +70,11 @@ void setupMenus() {
     // Make this static so it persists
     static AppMenuHandler* handler = [[AppMenuHandler alloc] init];
 
-    NSMenuItem* trainMenuItem = [[NSMenuItem alloc] initWithTitle:@"Train Network"
+    NSMenuItem* trainMenuItem = [[NSMenuItem alloc] initWithTitle:@"Run Network"
                                                            action:@selector(trainNetwork:)
                                                     keyEquivalent:@"l"];
     [trainMenuItem setTarget:handler];
     [actionsMenu addItem:trainMenuItem];
-
-    NSMenuItem* forwardMenuItem = [[NSMenuItem alloc] initWithTitle:@"Run Inference"
-                                                             action:@selector(runInference:)
-                                                      keyEquivalent:@"f"];
-    [forwardMenuItem setTarget:handler];
-    [actionsMenu addItem:forwardMenuItem];
 
     NSMenuItem* saveParamsMenuItem = [[NSMenuItem alloc] initWithTitle:@"Save Parameters"
                                                                 action:@selector(saveParameters:)

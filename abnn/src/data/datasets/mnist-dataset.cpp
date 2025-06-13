@@ -13,6 +13,7 @@
 #include <cassert>
 #include <mach-o/dyld.h>
 
+
 MNISTDataset::MNISTDataset(const std::string& imagesFilename, const std::string& labelsFilename, int batchSize):
 currentSampleIndex_(0), batchedInputData_(nullptr), batchedTargetData_(nullptr), batchSize_(batchSize)
 {

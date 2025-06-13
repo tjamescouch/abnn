@@ -5,6 +5,9 @@
 #include <fstream>
 #include <cassert>
 #include <iostream>
+#include <mach-o/dyld.h>
+#include <filesystem>
+#include "logger.h"
 
 using namespace std;
 
@@ -33,6 +36,8 @@ BrainEngine::~BrainEngine()
  *─────────────────────────────────────────────────────────────────────────────*/
 void BrainEngine::buildMetalObjects()
 {
+    namespace fs = std::filesystem;
+    
     computeLibrary_ = device_->newDefaultLibrary();
     assert(computeLibrary_ && "Failed to load default .metallib");
 
@@ -45,6 +50,17 @@ void BrainEngine::buildMetalObjects()
     renormPipeline_ = device_->newComputePipelineState(fn, &err);
     assert(renormPipeline_ && "failed to create renorm pipeline");
     fn->release();
+    
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        throw std::runtime_error("❌ Executable path buffer too small.");
+    }
+    
+    fs::path executablePath = fs::canonical(path);
+    fs::path resourcePath = executablePath.parent_path().parent_path() / "Resources" / "model.bnn";
+    
+    this->loadModel(resourcePath);
 }
 
 /*───────────────────────────────────────────────────────────────────────────────
@@ -85,7 +101,7 @@ bool BrainEngine::saveModel(const string& path) const
 }
 
 /*───────────────────────────────────────────────────────────────────────────────
- * Run simulation
+ * Run network
  *─────────────────────────────────────────────────────────────────────────────*/
 void BrainEngine::run(uint32_t passes)
 {
@@ -93,6 +109,7 @@ void BrainEngine::run(uint32_t passes)
 
     uint32_t hostTick = 0;   // mirror of GPU clock (32-bit, wraps like GPU)
 
+    Logger::log << "🔋 Running network" << std::endl;
     for (uint32_t p = 0; p < passes; ++p)
     {
         auto cmdBuf = commandQueue_->commandBuffer();

@@ -5,8 +5,12 @@
 //
 //  Created by James Couch on 2024-12-07.
 //
-#import "app-delegate.h"
+
 #include "app-kit-bridge.h"
+#import "app-delegate.h"
+#include <mach-o/dyld.h>
+#include <filesystem>
+#include <fstream>
 
 #pragma mark - AppDelegate
 #pragma region AppDelegate {
@@ -72,6 +76,7 @@ void AppDelegate::applicationWillFinishLaunching( NS::Notification* pNotificatio
 
 void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification )
 {
+    namespace fs = std::filesystem;
     CGRect frame = (CGRect){ {10, 10}, {640, 640} };
 
     
@@ -97,10 +102,19 @@ void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification
     
     _pWindow->makeKeyAndOrderFront( nullptr );
     
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        throw std::runtime_error("❌ Executable path buffer too small.");
+    }
+    
+    fs::path executablePath = fs::canonical(path);
+    fs::path resourcePath = executablePath.parent_path().parent_path() / "Resources";
+    
     setMenuActionHandlers(
         [this] { this->getBrainEngine()->run(1000); },
-        [this] { this->getBrainEngine()->saveModel("model.txt"); },
-        [this] { this->getBrainEngine()->loadModel("model.txt"); }
+        [this, resourcePath] { this->getBrainEngine()->saveModel(resourcePath / "model.bnn"); },
+        [this, resourcePath] { this->getBrainEngine()->loadModel(resourcePath / "model.bnn"); }
     );
 
     setupMenus();
