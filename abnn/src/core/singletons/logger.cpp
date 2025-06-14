@@ -1,96 +1,59 @@
-// logger.cpp  –  dynamic trace + EMA-loss logger
-// ==============================================
-
 #include "logger.h"
 #include <filesystem>
-#include <iomanip>
 #include <iostream>
-#include <cmath>
 #include <numeric>
-#include <algorithm>
 
 namespace fs = std::filesystem;
 
-// ---------- ctor ------------------------------------------------------------
-Logger::Logger(size_t nIn, size_t nOut,
-               size_t windowIn, size_t windowOut,
-               float  emaAlpha)
-: winIn_(windowIn)
-, winOut_(windowOut)
-, nIn_(nIn)
-, nOut_(nOut)
-, emaLoss_(0.f)
-, alpha_(emaAlpha)
+/* ctor: open session file, write header */
+Logger::Logger(int nIn, int nOut)
+: nIn_(nIn), nOut_(nOut)
 {
     fs::path p = fs::current_path() / "abnn_session.m";
-    matFile_.open(p, std::ios::trunc);
-    if (!matFile_)
-        std::cerr << "‼️  cannot create " << p << '\n';
+    mat_.open(p, std::ios::trunc);
+    if (!mat_)
+        std::cerr << "❌ cannot open " << p << '\n';
     else
-        std::cout << "📄  MATLAB log file → " << p << '\n';
+        mat_ << "% ABNN animated session\n";
+    
+    mat_ << "x = linspace(0, " << nIn - 1 << ");\n";
 }
 
-// ---------- log_samples -----------------------------------------------------
-void Logger::log_samples(const std::vector<float>& target,
-                         const std::vector<float>& pred)
+/* dtor: close file */
+Logger::~Logger() { if(mat_) mat_.close(); }
+
+/* animate one frame ------------------------------------------------------ */
+void Logger::log_samples(const std::vector<float>& in,
+                         const std::vector<float>& out)
 {
-    if (target.size() != nIn_ || pred.size() != nOut_) return;
+    if(!mat_) return;
+    
+    
 
-    std::scoped_lock lock(mtx_);
+    /* input */
+    mat_ << "clf;\nsubplot(2,1,1);\ny = [ ";
+    for(size_t i=0;i<in.size();++i){ if(i) mat_<<","; mat_<<in[i]; }
+    mat_ << " ];\nplot(x,y);\nylim([0 1]);\ntitle('Input');\n";
 
-    if (inBuf_.size()  == winIn_)  inBuf_.pop_front();
-    if (outBuf_.size() == winOut_) outBuf_.pop_front();
-
-    inBuf_.push_back(target);
-    outBuf_.push_back(pred);
-
-    // EMA MSE loss
-    float mse = 0.f;
-    for (size_t i=0;i<nOut_;++i)
-        mse += (pred[i] - (i<nIn_ ? target[i] : 0.f)) *
-               (pred[i] - (i<nIn_ ? target[i] : 0.f));
-    mse /= nOut_;
-    emaLoss_ = alpha_ * mse + (1.f - alpha_) * emaLoss_;
-
-    std::cout << "\r✨ EMA-Loss: "
-              << std::fixed << std::setprecision(6)
-              << emaLoss_ << std::flush;
+    /* output
+    mat_ << "subplot(2,1,2);\nplot(";
+    for(size_t i=0;i<out.size();++i){ if(i) mat_<<","; mat_<<out[i]; }
+    mat_ << ", 'r-'); ylim([0 1]); title('Output');\n";
+    mat_ << "drawnow; pause(0.03);\n\n";
+    mat_.flush();*/
 }
 
-// ---------- flush_to_matlab -------------------------------------------------
-void Logger::flush_to_matlab()
+/* loss EMA --------------------------------------------------------------- */
+void Logger::accumulate_loss(double loss)
 {
-    std::scoped_lock lock(mtx_);
-    if (!matFile_) return;
-    matFile_.seekp(0, std::ios::beg);
+    if(step_==0) ema_ = loss;
+    else         ema_ = beta_*ema_ + (1.0-beta_)*loss;
+    ++step_;
 
-    // channel-0 of input over time
-    matFile_ << "input = [";
-    for (bool first=true; const auto& v : inBuf_) {
-        if (!first) matFile_ << ", "; first=false;
-        matFile_ << v[0];
-    }
-    matFile_ << "];\n";
+    if(step_ % 200 == 0) flush_loss();
+}
 
-    // fraction of output neurons that spiked each timestep
-    matFile_ << "output = [";
-    for (bool first=true; const auto& v : outBuf_) {
-        float frac = std::accumulate(v.begin(), v.end(), 0.f) / v.size();
-        if (!first) matFile_ << ", "; first=false;
-        matFile_ << frac;
-    }
-    matFile_ << "];\n";
-
-    matFile_ << "figure(1); clf;\n"
-                "subplot(2,1,1);\n"
-                "plot(input, 'b-'); title('Input channel 0'); ylim([0 1]);\n"
-                "subplot(2,1,2);\n"
-                "stem(output, 'r.'); title('Fraction of outputs spiked'); "
-                "ylim([0 1]);\n"
-                "drawnow;\n"
-                "disp('Press Ctrl+C to stop viewer'); pause;\n";
-
-    matFile_.flush();
-    std::cout << "\n🖋️  MATLAB script updated ("
-              << inBuf_.size() << " time-pts)\n";
+void Logger::flush_loss()
+{
+    std::cout << "✨ EMA-Loss: " << ema_ << '\n';
 }

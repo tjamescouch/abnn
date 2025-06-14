@@ -1,6 +1,6 @@
 #pragma once
-// brain-engine.h  –  asynchronous harness driving Brain
-// ======================================================
+/* brain-engine.h  –  asynchronous harness driving Brain
+   ===================================================== */
 
 #include <Metal/Metal.hpp>
 #include <memory>
@@ -8,23 +8,19 @@
 #include <thread>
 #include <atomic>
 #include <string>
-
-#include "brain.h"
 #include "logger.h"
 
-// ---------------------------------------------------------------------------
-// Abstract stimulus provider (pulls one input vector each pass)
-// ---------------------------------------------------------------------------
+#include "brain.h"
+
+/* ───────── minimal stimulus interface ──────────────────────────────────── */
 class StimulusProvider {
 public:
     virtual ~StimulusProvider() = default;
-    virtual std::vector<float> next() = 0;   // length == nInput
-    virtual double             time() const = 0;
+    virtual std::vector<float> next()      = 0;   /* returns length nInput   */
+    virtual double             time() const= 0;   /* current stimulus time s */
 };
 
-// ---------------------------------------------------------------------------
-// BrainEngine
-// ---------------------------------------------------------------------------
+/* ───────── BrainEngine ─────────────────────────────────────────────────── */
 class BrainEngine
 {
 public:
@@ -32,37 +28,35 @@ public:
                 uint32_t     nInput,
                 uint32_t     nOutput,
                 uint32_t     eventsPerPass = 1'000'000);
-    ~BrainEngine();                                              // defined in .cpp
+    ~BrainEngine();
 
-    /* model I/O ----------------------------------------------------------- */
+    /* load / save model (.bnn) ------------------------------------------- */
     bool load_model(const std::string& filename = "");
     bool save_model(const std::string& filename = "") const;
 
-    /* runtime ------------------------------------------------------------- */
-    void set_stimulus(std::shared_ptr<StimulusProvider>);
-    std::vector<bool> run_one_pass();        // single synchronous pass
-    void start_async();                      // background loop
+    /* drive / run --------------------------------------------------------- */
+    void set_stimulus(std::shared_ptr<StimulusProvider> stim);
+    std::vector<bool> run_one_pass();    /* synchronous single pass */
+
+    /* async loop ---------------------------------------------------------- */
+    void start_async();
     void stop_async();
     bool is_running() const { return running_.load(); }
 
     uint32_t events_per_pass() const { return eventsPerPass_; }
 
 private:
-    void build_library_and_queue();
-
-    /* Metal objects */
     MTL::Device*       device_{nullptr};
     MTL::CommandQueue* commandQueue_{nullptr};
     MTL::Library*      defaultLib_{nullptr};
 
-    /* Core */
-    std::unique_ptr<Brain>            brain_;
-    std::unique_ptr<Logger>           logger_;
-    std::shared_ptr<StimulusProvider> stimulus_;
+    std::unique_ptr<Brain>  brain_;
+    std::unique_ptr<Logger> logger_;
 
-    uint32_t nInput_{0}, nOutput_{0}, eventsPerPass_{0};
+    std::shared_ptr<StimulusProvider> stim_;
 
-    /* Async */
+    uint32_t nIn_{0}, nOut_{0}, eventsPerPass_{0};
+
     std::thread       worker_;
     std::atomic<bool> running_{false};
 };

@@ -1,29 +1,31 @@
-// functional-dataset.cpp
-// ----------------------
-// Sliding sinusoid stimulus for ABNN
-
 #include "functional-dataset.h"
-#include <cmath>
+#include <cmath>     /* std::sin, M_PI */
 
+/* ctor initialises parameters */
 FunctionalDataset::FunctionalDataset(uint32_t nInput,
-                                     double   dtSeconds,
+                                     double   dtSec,
                                      double   freqHz)
-: nIn_(nInput)
-, dtSec_(dtSeconds)
-, freqHz_(freqHz)
+: nInput_(nInput)
+, dt_     (dtSec)
+, fHz_    (freqHz)
+, phase_  (0.0)
+, tSec_   (0.0)
 {}
 
+/* advance phase and return new vector */
 std::vector<float> FunctionalDataset::next()
 {
-    double base = 2.0 * M_PI * freqHz_ * (tick_ * dtSec_);
-    ++tick_;
+    /* advance phase: phase = phase + f * dt  (wrap at 1.0) */
+    phase_ += fHz_ * dt_;
+    if (phase_ > 1.0) phase_ -= 1.0;
+    tSec_  += dt_;
 
-    std::vector<float> v(nIn_);
-    for (size_t i = 0; i < nIn_; ++i)
-    {
-        double phase = base + (2.0 * M_PI * i / nIn_);
-        v[i] = 0.5f * (1.0 + std::sin(phase));
+    /* build 0‒1 sine wave across spatial index */
+    std::vector<float> v(nInput_);
+    for (uint32_t i = 0; i < nInput_; ++i) {
+        double x = static_cast<double>(i) / nInput_;           /* 0‒1 */
+        double s = std::sin(2.0 * M_PI * (x + phase_));        /* -1‒1 */
+        v[i] = static_cast<float>(0.5 * (s + 1.0));            /* 0‒1 */
     }
     return v;
 }
-

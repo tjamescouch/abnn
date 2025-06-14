@@ -35,7 +35,7 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
     
     auto stim = std::make_shared<FunctionalDataset>(
                     /*nInput=*/256,
-                    /*dtSec =*/ dt,
+                    /*dtSec =*/ dt,//dt,
                     /*freqHz=*/1.0);
     _pBrainEngine->set_stimulus(stim);
     _pBrainEngine->start_async();
