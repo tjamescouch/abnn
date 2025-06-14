@@ -18,6 +18,7 @@
 //#define DEBUG_INPUT_LAYER
 //#define DEBUG_DROPOUT_LAYER
 
+
 #include <Metal/Metal.hpp>
 #include <AppKit/AppKit.hpp>
 #include <MetalKit/MetalKit.hpp>

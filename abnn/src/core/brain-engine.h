@@ -18,6 +18,8 @@
 #include <thread>
 #include <atomic>
 #include <cstdint>
+#include "rate-filter.h"
+
 
 /* forward decls -------------------------------------------------------- */
 class Brain;
@@ -31,7 +33,7 @@ public:
     BrainEngine(MTL::Device* device,
                 uint32_t     nInput,
                 uint32_t     nOutput,
-                uint32_t     eventsPerPass = 10'000'000);
+                uint32_t     eventsPerPass = 100'000'000);
     ~BrainEngine();
 
     /* attach stimulus generator BEFORE start_async() */
@@ -76,4 +78,5 @@ private:
     const size_t WIN_SIZE_ = 1000;        /* 1000 passes ≈ 1 s          */
 
     double lastLoss_{0.25};               /* baseline for graded reward */
+    RateFilter rateFilter_{ /*τ=*/0.05, /*useFIR=*/false };
 };

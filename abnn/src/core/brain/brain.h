@@ -15,7 +15,7 @@
 
 /* -------- constants shared with kernel -------------------------------- */
 static constexpr uint32_t kTickNS       = 1000;      /* 1 µs virtual tick  */
-static constexpr uint32_t kMaxSpikes    = 32;        /* exploration budget */
+static constexpr uint32_t kMaxSpikes    = 256;        /* exploration budget */
 static constexpr uint32_t kRenormThresh = 4'000'000; /* renorm every 4 M   */
 
 struct SynapsePacked { uint32_t src, dst; float w, pad; };

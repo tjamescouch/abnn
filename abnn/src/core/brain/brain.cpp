@@ -96,7 +96,7 @@ void Brain::encode_traversal(MTL::CommandBuffer* cb)
     enc->setBuffer(bufClock_,     0, 3);
     enc->setBytes (&N_SYN_, sizeof(uint32_t), 4);
 
-    uint32_t tauVis=4000, tauPre=2000;
+    uint32_t tauVis=50'000, tauPre=50'000;
     enc->setBytes(&tauVis,sizeof(uint32_t),5);
     enc->setBytes(&tauPre,sizeof(uint32_t),6);
 

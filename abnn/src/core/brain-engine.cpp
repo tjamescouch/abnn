@@ -14,6 +14,7 @@
 #include <iostream>
 #include "logger.h"
 #include "stimulus-provider.h"
+#include "common.h"
 
 namespace fs = std::filesystem;
 
@@ -61,7 +62,7 @@ BrainEngine::BrainEngine(MTL::Device* dev,
     commandQueue_ = device_->newCommandQueue();
     defaultLib_   = device_->newDefaultLibrary();
 
-    brain_ = std::make_unique<Brain>(nIn_, nOut_, 512, 10000, eventsPerPass_);
+    brain_ = std::make_unique<Brain>(nIn_, nOut_, 5120, 100'000, eventsPerPass_);
     brain_->build_pipeline(device_, defaultLib_);
     brain_->build_buffers (device_);
 
@@ -113,7 +114,7 @@ std::vector<bool> BrainEngine::run_one_pass()
     uint32_t* lf  = (uint32_t*)brain_->last_fired_buffer()->contents();
     uint32_t  now = *(uint32_t*)brain_->clock_buffer()->contents();
 
-    float teacherRate = 0.2f;      // adjust so average teacher spikes ~20% of ticks
+    float teacherRate = 1.f;      // adjust so average teacher spikes ~20% of ticks
     for (uint32_t o = 0; o < nOut_; ++o) {
         float p = in[o] * teacherRate;
         if (uni(rng) < p && (now - lf[nIn_ + o] > 1)) {
@@ -122,21 +123,27 @@ std::vector<bool> BrainEngine::run_one_pass()
     }
 
     auto cb=commandQueue_->commandBuffer();
-    brain_->encode_traversal(cb); cb->commit(); cb->waitUntilCompleted();
+
+    brain_->encode_traversal(cb);
+    
+    cb->commit();
+    cb->waitUntilCompleted();
 
     auto out = brain_->read_outputs();
 
     static std::vector<float> rate(nOut_, 0.f);
-    const float alpha = 0.01f;                // smoothing factor
+    const float alpha = 0.1f;                // smoothing factor
 
-    auto spikes = brain_->read_outputs();     // vector<bool>
-    for (uint32_t i = 0; i < nOut_; ++i) {
-        float s = spikes[i] ? 1.f : 0.f;
-        rate[i] = (1 - alpha)*rate[i] + alpha * s;
+    auto spikes = brain_->read_outputs();
+    for (int i = 0; i < nOut_; ++i) {
+        rate[i] = (1-alpha)*rate[i] + alpha*(spikes[i]?1.f:0.f);
     }
 
-    if (step++ % 100 == 0)
-        logger_->log_samples(in, rate);
+    auto smoothRate = rateFilter_.process(rate, 0.001);
+
+    if ((++step % 100) == 0) {
+        logger_->log_samples(in, smoothRate);
+    }
     
     /* sliding window */
     for(uint32_t i=0;i<nOut_;++i) spikeWindow_[i]+= out[i]?1:0;
@@ -144,7 +151,7 @@ std::vector<bool> BrainEngine::run_one_pass()
     if(winPos_==WIN_SIZE_){
         double loss = 0.0;
         for (uint32_t i = 0; i < nOut_; ++i) {
-            double err = rate[i] - in[i];
+            double err = smoothRate[i] - in[i];
             loss += err * err;
         }
         loss /= nOut_;
