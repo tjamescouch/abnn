@@ -28,14 +28,9 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 {
     _pBrainEngine = new BrainEngine(_pDevice, 256, 128);
 
-    // 1-Hz sine stimulus: f(t) = sin(2π·1·t), sample once per pass
-    double dt = Brain::kTickNS * _pBrainEngine->events_per_pass() * 1e-9; // seconds/pass
-
-
-    
     auto stim = std::make_shared<FunctionalDataset>(
                     /*nInput=*/256,
-                    /*dtSec =*/ dt,//dt,
+                    /*dtSec =*/ 0.01,//dt,
                     /*freqHz=*/1.0);
     _pBrainEngine->set_stimulus(stim);
     _pBrainEngine->start_async();

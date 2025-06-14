@@ -15,8 +15,6 @@ Logger::Logger(int nIn, int nOut)
         std::cerr << "❌ cannot open " << p << '\n';
     else
         mat_ << "% ABNN animated session\n";
-    
-    mat_ << "x = linspace(0, " << nIn - 1 << ");\n";
 }
 
 /* dtor: close file */
@@ -28,19 +26,32 @@ void Logger::log_samples(const std::vector<float>& in,
 {
     if(!mat_) return;
     
+    // input
+    mat_ << "clf;\nhold on;\nylim([-1 1]);\n";
     
+    mat_ << "xo = [ ";
+    for(size_t i=0;i<nOut_;++i){ mat_<<i; mat_<<" "; }
+    mat_ << "];\n";
+    
+    mat_ << "x = [ ";
+    for(size_t i=0;i<in.size();++i){ mat_<<i; mat_<<" "; }
+    mat_ << "];\n";
+    
+    mat_ << "y = [ ";
+    for(size_t i=0;i<in.size();++i){ mat_<<in[i]; mat_<<" "; }
+    mat_ << "];\n";
 
-    /* input */
-    mat_ << "clf;\nsubplot(2,1,1);\ny = [ ";
-    for(size_t i=0;i<in.size();++i){ if(i) mat_<<","; mat_<<in[i]; }
-    mat_ << " ];\nplot(x,y);\nylim([0 1]);\ntitle('Input');\n";
 
-    /* output
-    mat_ << "subplot(2,1,2);\nplot(";
+    // output
+    mat_ << "\nz=[";
     for(size_t i=0;i<out.size();++i){ if(i) mat_<<","; mat_<<out[i]; }
-    mat_ << ", 'r-'); ylim([0 1]); title('Output');\n";
-    mat_ << "drawnow; pause(0.03);\n\n";
-    mat_.flush();*/
+    mat_ << "];title('Output');\n";
+
+    mat_ << "scatter(x,y,[],[],[0,0,1]);\n";
+    mat_ << "scatter(xo,z,[],[],[0,1,0]);\n";
+    mat_ << "hold off; pause(0.01);\n\n";
+    
+    mat_.flush();
 }
 
 /* loss EMA --------------------------------------------------------------- */
