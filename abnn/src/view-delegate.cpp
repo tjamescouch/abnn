@@ -26,11 +26,11 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 , _pDevice(pDevice)
 , _pBrainEngine(nullptr)
 {
-    _pBrainEngine = new BrainEngine(_pDevice, 256, 128);
+    _pBrainEngine = new BrainEngine(_pDevice, 256, 256);
 
     auto stim = std::make_shared<FunctionalDataset>(
                     /*nInput=*/256,
-                    /*dtSec =*/ 0.01,//dt,
+                    /*dtSec =*/ 0.001,//dt,
                     /*freqHz=*/1.0);
     _pBrainEngine->set_stimulus(stim);
     _pBrainEngine->start_async();

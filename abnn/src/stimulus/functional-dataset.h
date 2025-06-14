@@ -5,6 +5,7 @@
 
 #include "brain-engine.h"      // provides StimulusProvider interface
 #include <vector>
+#include "stimulus-provider.h"
 
 /* Returns a 0‒1 sine wave of length nInput_ whose phase advances dtSec_
    seconds each call (continuous animation). */
@@ -15,8 +16,8 @@ public:
                       double   dtSec,
                       double   freqHz);
 
-    std::vector<float> next() override;   /* one frame of stimulus */
-    double             time() const override { return tSec_; }
+    std::vector<float> next();   /* one frame of stimulus */
+    double             time() const { return tSec_; }
 
 private:
     uint32_t nInput_;

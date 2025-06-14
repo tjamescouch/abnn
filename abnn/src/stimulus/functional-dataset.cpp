@@ -1,5 +1,6 @@
 #include "functional-dataset.h"
 #include <cmath>     /* std::sin, M_PI */
+#include "stimulus-provider.h"
 
 /* ctor initialises parameters */
 FunctionalDataset::FunctionalDataset(uint32_t nInput,

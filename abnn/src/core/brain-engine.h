@@ -1,62 +1,79 @@
 #pragma once
-/* brain-engine.h  –  asynchronous harness driving Brain
-   ===================================================== */
+/* brain-engine.h  –  harness driving a Brain instance
+ * =====================================================================
+ * Implements
+ *   • teacher forcing
+ *   • sliding-window loss  (window = 1000 passes ≈ 1 s)
+ *   • graded reward  (loss decrease → positive reward)
+ *
+ * Public API
+ *   BrainEngine(device,nInput,nOutput [,eventsPerPass])
+ *   set_stimulus(shared_ptr<StimulusProvider>)
+ *   start_async() / stop_async()
+ */
 
 #include <Metal/Metal.hpp>
 #include <memory>
 #include <vector>
 #include <thread>
 #include <atomic>
-#include <string>
-#include "logger.h"
+#include <cstdint>
 
-#include "brain.h"
+/* forward decls -------------------------------------------------------- */
+class Brain;
+class Logger;
+class StimulusProvider;
 
-/* ───────── minimal stimulus interface ──────────────────────────────────── */
-class StimulusProvider {
-public:
-    virtual ~StimulusProvider() = default;
-    virtual std::vector<float> next()      = 0;   /* returns length nInput   */
-    virtual double             time() const= 0;   /* current stimulus time s */
-};
-
-/* ───────── BrainEngine ─────────────────────────────────────────────────── */
+/* ===================================================================== */
 class BrainEngine
 {
 public:
     BrainEngine(MTL::Device* device,
                 uint32_t     nInput,
                 uint32_t     nOutput,
-                uint32_t     eventsPerPass = 1'000'000);
+                uint32_t     eventsPerPass = 10'000'000);
     ~BrainEngine();
 
-    /* load / save model (.bnn) ------------------------------------------- */
-    bool load_model(const std::string& filename = "");
-    bool save_model(const std::string& filename = "") const;
-
-    /* drive / run --------------------------------------------------------- */
+    /* attach stimulus generator BEFORE start_async() */
     void set_stimulus(std::shared_ptr<StimulusProvider> stim);
-    std::vector<bool> run_one_pass();    /* synchronous single pass */
 
-    /* async loop ---------------------------------------------------------- */
+    /* non-blocking background loop */
     void start_async();
     void stop_async();
-    bool is_running() const { return running_.load(); }
-
-    uint32_t events_per_pass() const { return eventsPerPass_; }
+    
+    /* model persistence (binary .bnn) */
+    bool  load_model(const std::string& filename = "");
+    bool  save_model(const std::string& filename = "") const;
 
 private:
+
+
+    /* single synchronous simulation pass */
+    std::vector<bool> run_one_pass();
+
+    /* Metal handles ---------------------------------------------------- */
     MTL::Device*       device_{nullptr};
     MTL::CommandQueue* commandQueue_{nullptr};
     MTL::Library*      defaultLib_{nullptr};
 
+    /* ABNN + logging --------------------------------------------------- */
     std::unique_ptr<Brain>  brain_;
     std::unique_ptr<Logger> logger_;
-
     std::shared_ptr<StimulusProvider> stim_;
 
-    uint32_t nIn_{0}, nOut_{0}, eventsPerPass_{0};
-
+    /* async thread ----------------------------------------------------- */
     std::thread       worker_;
     std::atomic<bool> running_{false};
+
+    /* dimensions / params --------------------------------------------- */
+    uint32_t nIn_{0};
+    uint32_t nOut_{0};
+    uint32_t eventsPerPass_{0};
+
+    /* sliding-window loss state --------------------------------------- */
+    std::vector<uint32_t> spikeWindow_;   /* counts per output neuron   */
+    size_t winPos_{0};
+    const size_t WIN_SIZE_ = 1000;        /* 1000 passes ≈ 1 s          */
+
+    double lastLoss_{0.25};               /* baseline for graded reward */
 };

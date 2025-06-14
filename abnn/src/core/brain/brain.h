@@ -1,88 +1,83 @@
 #pragma once
-/* brain.h  –  lightweight biologically-inspired event-driven NN core
-   =================================================================
-   Drop this header next to brain.cpp / brain.metal. It exposes the public
-   interface used by BrainEngine and hides all Metal details inside.        */
+/* brain.h  –  Host-side ABNN representation
+ * ====================================================================
+ * * Owns all Metal buffers and pipelines
+ * * encode_traversal() enqueues one Monte-Carlo pass
+ * * Exposes reward_buffer() and last_fired_buffer() for
+ *   teacher-forcing / reward-modulated STDP.
+ */
 
+#include <Metal/Metal.hpp>
 #include <vector>
 #include <cstdint>
-#include <iosfwd>
+#include <istream>
+#include <ostream>
 
-namespace MTL {
-class Device;
-class Library;
-class CommandBuffer;
-class Buffer;
-class ComputePipelineState;
-}
+/* -------- constants shared with kernel -------------------------------- */
+static constexpr uint32_t kTickNS       = 1000;      /* 1 µs virtual tick  */
+static constexpr uint32_t kMaxSpikes    = 32;        /* exploration budget */
+static constexpr uint32_t kRenormThresh = 4'000'000; /* renorm every 4 M   */
 
-/* compact synapse in GPU buffer ------------------------------------------------ */
-struct SynapsePacked
-{
-    uint32_t src;
-    uint32_t dst;
-    float    w;
-    float    pad;
-};
+struct SynapsePacked { uint32_t src, dst; float w, pad; };
 
-/* ───────────────────────────────────────────────────────────────────────────── */
+/* ===================================================================== */
 class Brain
 {
 public:
-    static constexpr uint32_t kTickNS         = 1000;        /* 1 µs per tick   */
-    static constexpr uint32_t kRenormThreshold= 1'000'000;   /* ticks           */
-    static constexpr uint32_t kMaxSpikes      = 16;          /* spike budget    */
-
-    /* construction ---------------------------------------------------------- */
-    Brain(uint32_t nInput,  uint32_t nOutput,
-          uint32_t nHidden, uint32_t nSynapses,
-          uint32_t eventsPerKernel);
+    Brain(uint32_t nInput,
+          uint32_t nOutput,
+          uint32_t nHidden,
+          uint32_t nSynapses,
+          uint32_t eventsPerPass);
     ~Brain();
 
-    /* one-time GPU initialisation ------------------------------------------ */
-    void build_pipeline(MTL::Device* dev, MTL::Library* lib);
-    void build_buffers (MTL::Device* dev);
+    /* one-time initialisation */
+    void build_pipeline(MTL::Device*, MTL::Library*);
+    void build_buffers (MTL::Device*);
 
-    /* per-pass GPU encoding ------------------------------------------------- */
-    void encode_traversal(MTL::CommandBuffer* cb);
-
-    /* drive & read ---------------------------------------------------------- */
-    void inject_inputs(const std::vector<float>& analogue, float poissonHz);
+    /* per-pass operations */
+    void encode_traversal(MTL::CommandBuffer*);
+    void inject_inputs(const std::vector<float>& vals, float hz);
     std::vector<bool> read_outputs() const;
 
-    /* persistence ----------------------------------------------------------- */
-    void save(std::ostream& os) const;
-    void load(std::istream& is);
+    /* persistence */
+    void save(std::ostream&) const;
+    void load(std::istream&);
 
-    /* getters --------------------------------------------------------------- */
+    /* getters ----------------------------------------------------------- */
     uint32_t n_input () const { return N_INPUT_;  }
     uint32_t n_output() const { return N_OUTPUT_; }
     uint32_t n_hidden() const { return N_HIDDEN_; }
     uint32_t n_neuron() const { return N_NRN_;    }
     uint32_t n_syn   () const { return N_SYN_;    }
 
-    MTL::Buffer* synapse_buffer() const { return bufSyn_; }
-    MTL::Buffer* budget_buffer() const { return bufBudget_; }
+    MTL::Buffer* synapse_buffer()     const { return bufSyn_;       }
+    MTL::Buffer* last_fired_buffer()  const { return bufLastFire_;  }
+    MTL::Buffer* clock_buffer()       const { return bufClock_;     }
+    MTL::Buffer* reward_buffer()      const { return bufReward_;    }
+    MTL::Buffer* budget_buffer()      const { return bufBudget_;    }
 
 private:
     void release_all();
-    void renormalise_if_needed(MTL::CommandBuffer* cb);
+    void renormalise_if_needed(MTL::CommandBuffer*);
 
-    /* network sizes --------------------------------------------------------- */
+    /* immutable sizes */
     const uint32_t N_INPUT_, N_OUTPUT_, N_HIDDEN_;
-    const uint32_t N_NRN_,   N_SYN_;
-    const uint32_t EVENTS_;
+    const uint32_t N_NRN_,   N_SYN_,    EVENTS_;
 
-    /* Metal resources ------------------------------------------------------- */
-    MTL::Buffer* bufSyn_       {nullptr};   /* synapse array (managed)   */
-    MTL::Buffer* bufLastFire_  {nullptr};   /* per-neuron last spike ts  */
-    MTL::Buffer* bufLastVisit_ {nullptr};   /* (unused in current kern)  */
-    MTL::Buffer* bufClock_     {nullptr};   /* global tick counter       */
-    MTL::Buffer* bufBudget_    {nullptr};   /* remaining spikes budget   */
+    /* Metal buffers */
+    MTL::Buffer *bufSyn_       {nullptr};
+    MTL::Buffer *bufLastFire_  {nullptr};
+    MTL::Buffer *bufLastVisit_ {nullptr};
+    MTL::Buffer *bufClock_     {nullptr};
+    MTL::Buffer *bufBudget_    {nullptr};
+    MTL::Buffer *bufReward_    {nullptr};
+    MTL::Buffer *bufRBar_      {nullptr};
 
-    MTL::ComputePipelineState* pipeTraverse_{nullptr};
-    MTL::ComputePipelineState* pipeRenorm_  {nullptr};
+    /* pipelines */
+    MTL::ComputePipelineState *pipeTrav_{nullptr};
+    MTL::ComputePipelineState *pipeRenorm_{nullptr};
 
-    /* CPU-side copy of synapses for save/load convenience ------------------ */
+    /* host copy for inspection/debug */
     std::vector<SynapsePacked> hostSyn_;
 };

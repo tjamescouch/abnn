@@ -61,7 +61,7 @@ void Logger::accumulate_loss(double loss)
     else         ema_ = beta_*ema_ + (1.0-beta_)*loss;
     ++step_;
 
-    if(step_ % 200 == 0) flush_loss();
+    if(step_ % 2 == 0) flush_loss();
 }
 
 void Logger::flush_loss()
