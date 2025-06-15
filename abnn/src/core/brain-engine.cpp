@@ -62,7 +62,7 @@ BrainEngine::BrainEngine(MTL::Device* dev,
     commandQueue_ = device_->newCommandQueue();
     defaultLib_   = device_->newDefaultLibrary();
 
-    brain_ = std::make_unique<Brain>(nIn_, nOut_, 5120, 100'000, eventsPerPass_);
+    brain_ = std::make_unique<Brain>(nIn_, nOut_, 1000'000, 100'000, eventsPerPass_);
     brain_->build_pipeline(device_, defaultLib_);
     brain_->build_buffers (device_);
 
