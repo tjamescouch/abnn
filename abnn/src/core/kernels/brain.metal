@@ -25,7 +25,7 @@ inline float rand01(uint s)
 #define MAX_SPIKES    128u       /* global budget per kernel pass       */
 #define CLOCK_INC       1u       /* add per synapse                      */
 
-#define TARGET_RATE_HZ 10.0f     /* homeostatic set-point               */
+#define TARGET_RATE_HZ 1000.0f   /* homeostatic set-point               */
 #define ETA_HOME      1.0e-6f    /* homeostasis learning rate           */
 #define ETA_REWARD    1.0e-3f    /* reward modulation scale             */
 #define ALPHA_RBAR    0.001f     /* EWMA for running reward average     */

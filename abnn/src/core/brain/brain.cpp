@@ -8,6 +8,8 @@
 #include <random>
 #include <cmath>
 
+#include "constants.h"
+
 /* helper: release Metal obj */
 template<typename T> static void rel(T*& p){ if(p){ p->release(); p=nullptr; } }
 
@@ -101,7 +103,7 @@ void Brain::encode_traversal(MTL::CommandBuffer* cb)
     enc->setBytes(&tauVis,sizeof(uint32_t),5);
     enc->setBytes(&tauPre,sizeof(uint32_t),6);
 
-    float aLTP=0.02f,aLTD=0.010f,wMin=0.001f,wMax=1.0f;
+    float aLTP=_aLTP, aLTD=_aLTD, wMin= _wMin, wMax=_wMax;
     enc->setBytes(&aLTP,sizeof(float),7);
     enc->setBytes(&aLTD,sizeof(float),8);
     enc->setBytes(&wMin,sizeof(float),9);

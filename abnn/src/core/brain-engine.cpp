@@ -69,9 +69,12 @@ BrainEngine::BrainEngine(MTL::Device* dev,
 
     logger_ = std::make_unique<Logger>(nIn_, nOut_);
 
-    if(!load_model()){ std::cout<<"🆕  building random graph…\n";
-                       build_random_graph(*brain_); save_model(); }
+    if(!load_model()) {
+        std::cout<<"🆕  building random graph…\n";
+        build_random_graph(*brain_); save_model();
+    }
 }
+
 BrainEngine::~BrainEngine(){
     stop_async();
     if(commandQueue_)commandQueue_->release();

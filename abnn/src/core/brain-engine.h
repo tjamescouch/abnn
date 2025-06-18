@@ -19,17 +19,8 @@
 #include <atomic>
 #include <cstdint>
 #include "rate-filter.h"
+#include "constants.h"
 
-
-
-#define INPUT_RATE_HZ 10
-#define NUM_HIDDEN 500'000
-#define NUM_SYN    100'000'000
-#define PEAK_DECAY 0.999f         // how quickly old peaks fade
-#define EVENTS_PER_PASS 100'000'000
-#define FILTER_TAU 0.02
-#define USE_FIR false
-#define dT_SEC 0.001
 
 
 
