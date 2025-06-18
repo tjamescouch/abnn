@@ -107,6 +107,9 @@ void BrainEngine::set_stimulus(std::shared_ptr<StimulusProvider> s){ stim_=std::
 std::vector<bool> BrainEngine::run_one_pass()
 {
     if(!stim_) return {};
+    
+    NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+    
     auto in = stim_->next();
     brain_->inject_inputs(in, INPUT_RATE_HZ);
 
@@ -142,7 +145,7 @@ std::vector<bool> BrainEngine::run_one_pass()
         rate[i] = (1-alpha)*rate[i] + alpha*(spikes[i]?1.f:0.f);
     }
 
-    auto smoothRate = rateFilter_.process(rate, 0.0005);
+    auto smoothRate = rateFilter_.process(rate, 0.0009);
     
     // after computing smoothRate:
     for (auto r : smoothRate) {
@@ -162,7 +165,7 @@ std::vector<bool> BrainEngine::run_one_pass()
     /* sliding window */
     for(uint32_t i=0;i<nOut_;++i) spikeWindow_[i]+= out[i]?1:0;
     ++winPos_;
-    if(winPos_==WIN_SIZE_){
+    if(winPos_==WIN_SIZE_) {
         double loss = 0.0;
         for (uint32_t i = 0; i < nOut_; ++i) {
             double err = smoothRate[i] - in[i];
@@ -176,6 +179,8 @@ std::vector<bool> BrainEngine::run_one_pass()
         logger_->accumulate_loss(loss);
         winPos_=0;
     }
+    
+    pool->release();
     return out;
 }
 
