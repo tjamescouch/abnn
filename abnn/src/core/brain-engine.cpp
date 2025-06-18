@@ -16,8 +16,6 @@
 #include "stimulus-provider.h"
 #include "common.h"
 
-#define INPUT_RATE_HZ 10
-
 
 namespace fs = std::filesystem;
 
@@ -65,7 +63,7 @@ BrainEngine::BrainEngine(MTL::Device* dev,
     commandQueue_ = device_->newCommandQueue();
     defaultLib_   = device_->newDefaultLibrary();
 
-    brain_ = std::make_unique<Brain>(nIn_, nOut_, 1000'000, 100'000, eventsPerPass_);
+    brain_ = std::make_unique<Brain>(nIn_, nOut_, NUM_HIDDEN, NUM_SYN, eventsPerPass_);
     brain_->build_pipeline(device_, defaultLib_);
     brain_->build_buffers (device_);
 
@@ -145,13 +143,13 @@ std::vector<bool> BrainEngine::run_one_pass()
         rate[i] = (1-alpha)*rate[i] + alpha*(spikes[i]?1.f:0.f);
     }
 
-    auto smoothRate = rateFilter_.process(rate, 0.0009);
+    auto smoothRate = rateFilter_.process(rate, dT_SEC);
     
     // after computing smoothRate:
     for (auto r : smoothRate) {
         maxObserved = std::max(maxObserved, r);
     }
-    maxObserved *= decay;               // slowly forget old peaks
+    maxObserved *= PEAK_DECAY;               // slowly forget old peaks
 
     // now normalize:
     for (auto &r : smoothRate) {

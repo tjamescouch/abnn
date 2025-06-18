@@ -20,7 +20,7 @@ inline float rand01(uint s)
 
 /* ------------- build-time knobs --------------------------- */
 #define BASE_SCALE     0.8f      /* p = w² · BASE_SCALE                 */
-#define REFRACTORY     20u       /* dst silent window [ticks]           */
+#define REFRACTORY      2u       /* dst silent window [ticks]           */
 #define WINDOW_PRE      5u       /* pre spike valid window              */
 #define MAX_SPIKES    128u       /* global budget per kernel pass       */
 #define CLOCK_INC       1u       /* add per synapse                      */

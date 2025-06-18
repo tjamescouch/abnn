@@ -20,7 +20,17 @@
 #include <cstdint>
 #include "rate-filter.h"
 
-static constexpr float decay = 0.999f;         // how quickly old peaks fade
+
+
+#define INPUT_RATE_HZ 10
+#define NUM_HIDDEN 500'000
+#define NUM_SYN    100'000'000
+#define PEAK_DECAY 0.999f         // how quickly old peaks fade
+#define EVENTS_PER_PASS 100'000'000
+#define FILTER_TAU 0.02
+#define USE_FIR false
+#define dT_SEC 0.001
+
 
 
 /* forward decls -------------------------------------------------------- */
@@ -35,7 +45,7 @@ public:
     BrainEngine(MTL::Device* device,
                 uint32_t     nInput,
                 uint32_t     nOutput,
-                uint32_t     eventsPerPass = 100'000'000);
+                uint32_t     eventsPerPass = EVENTS_PER_PASS);
     ~BrainEngine();
 
     /* attach stimulus generator BEFORE start_async() */
@@ -80,5 +90,5 @@ private:
     const size_t WIN_SIZE_ = 1000;        /* 1000 passes ≈ 1 s          */
 
     double lastLoss_{0.25};               /* baseline for graded reward */
-    RateFilter rateFilter_{ /*τ=*/0.05, /*useFIR=*/false };
+    RateFilter rateFilter_{ /*τ=*/FILTER_TAU, /*useFIR=*/USE_FIR };
 };
