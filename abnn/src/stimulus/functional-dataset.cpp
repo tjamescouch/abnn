@@ -11,7 +11,9 @@ FunctionalDataset::FunctionalDataset(uint32_t nInput,
 , fHz_    (freqHz)
 , phase_  (0.0)
 , tSec_   (0.0)
-{}
+, v(nInput)
+{
+}
 
 /* advance phase and return new vector */
 std::vector<float> FunctionalDataset::next()
@@ -22,7 +24,7 @@ std::vector<float> FunctionalDataset::next()
     tSec_  += dt_;
 
     /* build 0‒1 sine wave across spatial index */
-    std::vector<float> v(nInput_);
+
     for (uint32_t i = 0; i < nInput_; ++i) {
         double x = static_cast<double>(i) / nInput_;           /* 0‒1 */
         double s = std::sin(2.0 * M_PI * (x + phase_));        /* -1‒1 */

@@ -10,7 +10,7 @@ public:
     /// @param useFIR   whether to apply a trailing moving-average
     /// @param firSize  window length for FIR (if enabled)
     RateFilter(double tauSec,
-               bool     useFIR  = false,
+               bool     useFIR  = true,
                std::size_t firSize = 20)
       : tau_{tauSec}
       , doFIR_{useFIR}

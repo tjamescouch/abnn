@@ -20,6 +20,7 @@ public:
     double             time() const { return tSec_; }
 
 private:
+    std::vector<float> v;
     uint32_t nInput_;
     double   dt_;        /* seconds per pass            */
     double   fHz_;       /* sine frequency in Hz        */

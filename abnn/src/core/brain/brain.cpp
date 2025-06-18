@@ -11,6 +11,9 @@
 /* helper: release Metal obj */
 template<typename T> static void rel(T*& p){ if(p){ p->release(); p=nullptr; } }
 
+std::mt19937 rng(std::random_device{}());
+std::uniform_real_distribution<float> uni(0.f,1.f);
+
 /* ===================================================================== */
 /* ctor / dtor                                                           */
 Brain::Brain(uint32_t nIn,uint32_t nOut,uint32_t nHid,
@@ -68,9 +71,7 @@ void Brain::build_buffers(MTL::Device* d)
 void Brain::inject_inputs(const std::vector<float>& v, float hz)
 {
     assert(v.size()==N_INPUT_);
-    float pTick = hz * kTickNS * 1e-9f;
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> uni(0.f,1.f);
+    float pTick = hz * kTickNS * NSEC_PER_SEC;
 
     uint32_t* lf  = static_cast<uint32_t*>(bufLastFire_->contents());
     uint32_t  now = *static_cast<uint32_t*>(bufClock_->contents());

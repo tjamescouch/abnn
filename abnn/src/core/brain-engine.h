@@ -20,6 +20,8 @@
 #include <cstdint>
 #include "rate-filter.h"
 
+static constexpr float decay = 0.999f;         // how quickly old peaks fade
+
 
 /* forward decls -------------------------------------------------------- */
 class Brain;
@@ -48,7 +50,7 @@ public:
     bool  save_model(const std::string& filename = "") const;
 
 private:
-
+    float maxObserved = 0.5f;     // initialize to expected plateau
 
     /* single synchronous simulation pass */
     std::vector<bool> run_one_pass();

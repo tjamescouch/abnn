@@ -16,6 +16,9 @@
 #include "stimulus-provider.h"
 #include "common.h"
 
+#define INPUT_RATE_HZ 10
+
+
 namespace fs = std::filesystem;
 
 int step = 0;
@@ -105,7 +108,7 @@ std::vector<bool> BrainEngine::run_one_pass()
 {
     if(!stim_) return {};
     auto in = stim_->next();
-    brain_->inject_inputs(in, 1000.f);
+    brain_->inject_inputs(in, INPUT_RATE_HZ);
 
     //–– Poisson teacher forcing: pTeach = in[o] * teacherRate
     static thread_local std::mt19937_64 rng{std::random_device{}()};
@@ -132,14 +135,25 @@ std::vector<bool> BrainEngine::run_one_pass()
     auto out = brain_->read_outputs();
 
     static std::vector<float> rate(nOut_, 0.f);
-    const float alpha = 0.1f;                // smoothing factor
+    const float alpha = 0.5f;                // smoothing factor
 
     auto spikes = brain_->read_outputs();
     for (int i = 0; i < nOut_; ++i) {
         rate[i] = (1-alpha)*rate[i] + alpha*(spikes[i]?1.f:0.f);
     }
 
-    auto smoothRate = rateFilter_.process(rate, 0.001);
+    auto smoothRate = rateFilter_.process(rate, 0.0005);
+    
+    // after computing smoothRate:
+    for (auto r : smoothRate) {
+        maxObserved = std::max(maxObserved, r);
+    }
+    maxObserved *= decay;               // slowly forget old peaks
+
+    // now normalize:
+    for (auto &r : smoothRate) {
+        r = std::min(r / maxObserved, 1.0f);
+    }
 
     if ((++step % 100) == 0) {
         logger_->log_samples(in, smoothRate);
@@ -169,13 +183,17 @@ std::vector<bool> BrainEngine::run_one_pass()
 void BrainEngine::start_async(){
     if(running_.load()||!stim_) return;
     running_.store(true);
-    worker_=std::thread([this]{ while(running_.load()){
-        run_one_pass();
-    }});
-    std::cout<<"▶️ Engine async loop started\n"; }
+    worker_=std::thread([this]{
+        while(running_.load()){
+            run_one_pass();
+        }
+    });
+    std::cout<<"▶️ Engine async loop started\n";
+}
 
 void BrainEngine::stop_async(){
     if(!running_.load()) return;
     running_.store(false);
     if(worker_.joinable()) worker_.join();
-    std::cout<<"⏹️ Engine async loop stopped\n"; }
+    std::cout<<"⏹️ Engine async loop stopped\n";
+}
