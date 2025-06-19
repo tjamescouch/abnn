@@ -77,7 +77,7 @@ void AppDelegate::applicationWillFinishLaunching( NS::Notification* pNotificatio
 void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification )
 {
     namespace fs = std::filesystem;
-    CGRect frame = (CGRect){ {10, 10}, {640, 640} };
+    CGRect frame = (CGRect){ {600, 300}, {640, 640} };
 
     
     _pWindow = NS::Window::alloc()->init(frame,
@@ -98,7 +98,7 @@ void AppDelegate::applicationDidFinishLaunching( NS::Notification* pNotification
     _pMtkView->setDelegate( _pViewDelegate );
     
     _pWindow->setContentView( _pMtkView );
-    _pWindow->setTitle( NS::String::string( "Metal Compute", NS::StringEncoding::UTF8StringEncoding ) );
+    _pWindow->setTitle( NS::String::string( "abnn", NS::StringEncoding::UTF8StringEncoding ) );
     
     _pWindow->makeKeyAndOrderFront( nullptr );
     

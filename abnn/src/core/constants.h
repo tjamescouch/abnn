@@ -1,9 +1,13 @@
 
-
-#define INPUT_RATE_HZ 1000
+#define NUM_INPUTS  256
+#define NUM_OUTPUTS 256
 #define NUM_HIDDEN 500'000
 #define NUM_SYN    100'000'000
-#define PEAK_DECAY 0.99f         // how quickly old peaks fade
+
+#define INPUT_SIN_WAVE_FREQUENCY 0.5
+
+#define INPUT_RATE_HZ 1000
+#define PEAK_DECAY 0.999f         // how quickly old peaks fade
 #define EVENTS_PER_PASS 150'000'000
 #define FILTER_TAU 0.02
 #define USE_FIR true

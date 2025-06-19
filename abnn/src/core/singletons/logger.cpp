@@ -49,7 +49,7 @@ void Logger::log_samples(const std::vector<float>& in,
 
     mat_ << "scatter(x,y,[],[],[0,0,1]);\n";
     mat_ << "scatter(xo,z,[],[],[0,1,0]);\n";
-    mat_ << "hold off; pause(0.01);\n\n";
+    mat_ << "hold off; pause(0.03);\n\n";
     
     mat_.flush();
 }
@@ -61,7 +61,7 @@ void Logger::accumulate_loss(double loss)
     else         ema_ = beta_*ema_ + (1.0-beta_)*loss;
     ++step_;
 
-    if(step_ % 2 == 0) flush_loss();
+    if(step_ % 4 == 0) flush_loss();
 }
 
 void Logger::flush_loss()

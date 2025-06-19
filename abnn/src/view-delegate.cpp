@@ -14,6 +14,7 @@
 #include "configuration-manager.h"
 #include "logger.h"
 #include "functional-dataset.h"
+#include "constants.h"
 
 const char* modelFilename = "simple.yml";
 
@@ -26,12 +27,12 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 , _pDevice(pDevice)
 , _pBrainEngine(nullptr)
 {
-    _pBrainEngine = new BrainEngine(_pDevice, 2560, 2560);
+    _pBrainEngine = new BrainEngine(_pDevice, NUM_INPUTS, NUM_OUTPUTS);
 
     auto stim = std::make_shared<FunctionalDataset>(
-                    /*nInput=*/2560,
-                    /*dtSec =*/ 0.001,//dt,
-                    /*freqHz=*/1.0);
+                    /*nInput=*/NUM_INPUTS,
+                    /*dtSec =*/ dT_SEC,//dt,
+                    /*freqHz=*/INPUT_SIN_WAVE_FREQUENCY);
     _pBrainEngine->set_stimulus(stim);
     _pBrainEngine->start_async();
 
