@@ -62,12 +62,15 @@ void Logger::accumulate_loss(double loss)
     else         ema_ = beta_*ema_ + (1.0-beta_)*loss;
     ++step_;
 
-    if(step_ % 4 == 0) flush();
+    std::setprecision(5);
+    std::cout << "✨ EMA-Loss: " << ema_ << " ❌ Raw loss: " << loss << std::endl;
+    
+    if(step_ % 10 == 0) flush();
 }
 
 void Logger::flush()
 {
-    std::cout << "✨ EMA-Loss: " << ema_ << '\n';
+    std::cout << "📈 Truncating output graph file" << '\n';
     
     mat_.flush();
     mat_.close();

@@ -1,8 +1,8 @@
 
 #define NUM_INPUTS  256
 #define NUM_OUTPUTS 256
-#define NUM_HIDDEN 500'000
-#define NUM_SYN    100'000'000
+#define NUM_HIDDEN 5'000'000
+#define NUM_SYN    1'000'000'000
 
 #define INPUT_SIN_WAVE_FREQUENCY 0.5
 
