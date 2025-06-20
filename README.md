@@ -1,4 +1,4 @@
-<img width="556" alt="image" src="https://github.com/user-attachments/assets/f8edbb8b-3ede-46c7-b029-ee17777390e7" /># ABNN: Reward-Modulated Spiking Neural Network
+# ABNN: Reward-Modulated Spiking Neural Network
 
 A biologically inspired, stochastic spiking neural network implemented in modern C++ (C++17) and Metal. ABNN uses event-driven Monte Carlo traversal, STDP, homeostatic plasticity, and reward modulation to learn arbitrary functional mappings.
 
