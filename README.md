@@ -227,7 +227,7 @@ struct GraphBNN {
 
 ---
 
-## 10. Testing & Validation
+## 10. Testing & Validation (WIP)
 
 * **Unit tests:** Fixed RNG seeds produce identical weight trajectories.
 * **Statistical:** Weight distributions converge to log-normal.
