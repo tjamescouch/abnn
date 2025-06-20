@@ -1,148 +1,221 @@
-1 Overview
-Aspect	Goal
-Computation style	Event-driven Monte-Carlo traversal rather than synchronous “layered” ticks
-Topology	Sparse directed graph
-Nodes ≈ neurons, edges ≈ chemical synapses
-State variables	Per-synapse weight, per-neuron last-fired timestamp, per-neuron last-visited timestamp
-Plasticity	Spike-Timing-Dependent Plasticity (STDP) on each traversal step
-Execution target	① CPU prototype (C++ 17) ② Metal-compute pipeline (MPS or Metal CPP)
+# ABNN: Reward-Modulated Spiking Neural Network
 
-2 Core Data Model
-All arrays are flat, contiguous, 64-bit aligned so they can be copied directly into GPU buffers.
+A biologically inspired, stochastic spiking neural network implemented in modern C++ (C++17) and Metal. ABNN uses event-driven Monte Carlo traversal, STDP, homeostatic plasticity, and reward modulation to learn arbitrary functional mappings.
 
-2.1 Header Section
-Offset	Type	Name	Description
-0	uint32_t	N_SYN	Total synapses
-4	uint32_t	N_NRN	Total neurons
-8 → 15	padding	—	Keep next array 16-byte aligned
+---
 
-Binary layout tip – Treat the header as a 16-byte struct; everything that follows can be reinterpret_cast on GPU.
+## 1. Overview
 
-2.2 Array Section (all std::vector<T> on CPU)
-Array	Type	Size	Semantics
-synapses	uint32_t[2]	N_SYN × 2	src, dst neuron indices
-weights	float32	N_SYN	Synaptic efficacy
-lastFiredNS	uint64_t	N_NRN	Last spike time (ns since start)
-lastVisitedNS	uint64_t	N_NRN	Last Monte-Carlo visit time
+| Aspect              | Goal                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| **Computation**     | Event-driven Monte Carlo traversal rather than synchronous “layered” ticks             |
+| **Topology**        | Sparse directed graph (neurons ⇄ nodes, synapses ⇄ edges)                              |
+| **State variables** | Per-synapse weight; per-neuron last-fired timestamp; per-neuron last-visited timestamp |
+| **Plasticity**      | Spike-Timing-Dependent Plasticity (STDP) on each traversal step                        |
+| **Targets**         | Metal compute (Metal-CPP / MPS)                           |
 
-GPU note – Combine synapses + weights into a SoA to enable coalesced reads:
-struct SynapsePacked { uint32_t src; uint32_t dst; float32 w; float32 pad; };
+---
 
-3 Global Clock
-Monotonic nanosecond counter incremented per simulated event, not wall-time.
+## 2. Core Data Model
 
-text
-Copy
+All arrays are flat, contiguous, 64-bit aligned so they can be mapped directly into GPU buffers.
+
+### 2.1 Header Section
+
+```
+Offset | Type      | Name   | Description
+-------|-----------|--------|----------------------------------------
+0      | uint32_t  | N_SYN  | Total number of synapses               
+4      | uint32_t  | N_NRN  | Total number of neurons                
+8–15   | padding   | —      | Aligns next array on 16-byte boundary  
+```
+
+> **Tip:** Treat the header as a 16-byte struct; everything that follows can be reinterpret\_cast in GPU shaders.
+
+### 2.2 Array Section (CPU: `std::vector<T>`)
+
+| Array           | Type                   | Size     | Semantics                                   |
+| --------------- | ---------------------- | -------- | ------------------------------------------- |
+| `synapses`      | `(uint32_t, uint32_t)` | N\_SYN×2 | Source and destination neuron indices       |
+| `weights`       | `float32`              | N\_SYN   | Synaptic efficacies                         |
+| `lastFiredNS`   | `uint64_t`             | N\_NRN   | Timestamp of last spike per neuron (ns)     |
+| `lastVisitedNS` | `uint64_t`             | N\_NRN   | Last Monte Carlo visit timestamp per neuron |
+
+> **GPU layout:** Combine synapses and weights for coalesced reads:
+>
+> ```cpp
+> struct SynapsePacked {
+>   uint32_t src;
+>   uint32_t dst;
+>   float    w;
+>   float    pad;
+> };
+> ```
+
+---
+
+## 3. Global Clock
+
+A monotonic nanosecond counter incremented per simulated event (not real wall-time):
+
+```cpp
 uint64_t NOW_NS = 0;
-const uint64_t ΔT_EVENT = 1;   // ns advanced per accepted traversal step
-• Keeps arithmetic on integers → deterministic, rollback-friendly.
-• Enables virtual-time Monte-Carlo so thousands of events can occur in a real-time millisecond.
+const uint64_t ΔT_EVENT = 1;  // ns advanced per accepted traversal step
+```
 
-4 Monte-Carlo Traversal Algorithm
-pseudocode
-Copy
+* Integer arithmetic ensures determinism and easy rollbacks.
+* Virtual-time Monte Carlo lets thousands of events simulate within a real-time millisecond.
+
+---
+
+## 4. Monte Carlo Traversal Algorithm
+
+**High-level pseudocode:**
+
+```pseudo
 for step in 0 .. STEPS-1:
-    edgeIdx = uniformInt(0, N_SYN-1)      // ① pick random synapse
+    edgeIdx = uniformInt(0, N_SYN-1)      // pick a random synapse
     src = synapses[edgeIdx].src
     dst = synapses[edgeIdx].dst
 
-    shouldFire = evaluateFire(src, dst)    // ② causal test
-    if shouldFire:
-        fire(src, dst, edgeIdx)            // ③ apply spike + plasticity
+    if evaluateFire(src, dst, edgeIdx):   // causal test
+        fire(src, dst, edgeIdx)           // apply spike & plasticity
 
-    lastVisitedNS[dst] = NOW_NS            // ④ update visitation
-    NOW_NS += ΔT_EVENT                     // ⑤ advance global time
-4.1 evaluateFire
-pseudocode
-Copy
-Δt_visit   = NOW_NS - lastVisitedNS[dst]
-Δt_spike   = NOW_NS - lastFiredNS[src]
-threshold  = baseThresh * exp(-Δt_visit / τ_dendritic)
+    lastVisitedNS[dst] = NOW_NS          // update visitation time
+    NOW_NS += ΔT_EVENT                   // advance clock
+```
 
-return Δt_spike < τ_pre_post and weights[edgeIdx] > randomFloat()
-Intuition
+### 4.1 `evaluateFire`
 
-Recency of visit approximates membrane potential decay.
+```pseudo
+Δt_visit  = NOW_NS - lastVisitedNS[dst]
+Δt_spike  = NOW_NS - lastFiredNS[src]
+threshold = baseThresh * exp(-Δt_visit / τ_dendritic)
 
-Δt_spike < τ_pre_post captures causal pairing needed for STDP.
+// Causal & stochastic firing decision
+return (Δt_spike < τ_pre_post) && (weights[edgeIdx] > randomFloat())
+```
 
-Weight comparison adds stochasticity resembling vesicle release probability.
+* **Membrane decay:** recency of visit approximates dendritic potential.
+* **STDP window:** Δt\_spike < τ\_pre\_post enforces causality.
+* **Stochasticity:** weight comparison simulates vesicle release probability.
 
-4.2 fire
-pseudocode
-Copy
+### 4.2 `fire`
+
+```pseudo
 lastFiredNS[dst] = NOW_NS
 
-// STDP update
-if NOW_NS - lastFiredNS[src] < τ_LTP:
+// STDP weight update
+if (NOW_NS - lastFiredNS[src] < τ_LTP):
     weights[edgeIdx] += α_LTP * (1 - weights[edgeIdx])
 else:
     weights[edgeIdx] -= α_LTD * weights[edgeIdx]
 
 // Homeostatic clipping
-weights[edgeIdx] = clamp(weights[edgeIdx], w_min, w_max)
-5 Plasticity & Rewiring
-Mechanism	Trigger	Action
-STDP	Pairing within τ_LTP / τ_LTD windows	Potentiate / depress current weight
-Synapse pruning	weights[i] < w_prune	Remove entry; compact array periodically
-Synaptogenesis	rand() < p_new on fire	Append new synapse (src,dst') with w_init
-Neuron addition	Off-line growth phase	Reallocate arrays and adjust header
+theta = clamp(weights[edgeIdx], w_min, w_max)
+```
 
-6 Initialization
-Allocate arrays.
+---
 
-Populate synapses via Erdős–Rényi or small-world generator.
+## 5. Plasticity & Rewiring
 
-Draw initial weights from Beta(2,8) (skewed low).
+| Mechanism           | Trigger                        | Action                                         |
+| ------------------- | ------------------------------ | ---------------------------------------------- |
+| **STDP**            | Spike pairing within τ windows | Potentiate or depress current weight           |
+| **Synapse pruning** | `weights[i] < w_prune`         | Remove synapse; compact array periodically     |
+| **Synaptogenesis**  | `rand() < p_new` on fire       | Append new synapse `(src, dst')` with `w_init` |
+| **Neuron addition** | Off-line growth phase          | Reallocate arrays; adjust header               |
 
-Set lastFiredNS[:] = lastVisitedNS[:] = 0.
+---
 
-Provide a YAML manifest to reproduce runs:
+## 6. Initialization
 
-yaml
-Copy
-neurons:  65536
-synapses: 524288
-tau_LTP:  20_000       # ns
-tau_LTD:  40_000
-alpha_LTP: 0.01
-alpha_LTD: 0.005
-w_min: 0.001
-w_max: 1.0
-steps: 1_000_000
-rng_seed: 42
-7 Parallel Execution Strategy
-7.1 CPU Prototype
-Sharded Monte-Carlo on std::thread pools: each worker owns a slice of synapses.
-Use lock-free atomic fetch-add for NOW_NS.
+1. Allocate arrays (`N_NRN`, `N_SYN`).
+2. Generate connectivity (Erdős–Rényi or small-world).
+3. Initialize `weights` \~ Beta(2,8) (skewed low).
+4. Zero `lastFiredNS` and `lastVisitedNS`.
+5. constants.h defines CPU side hyperparameters:
 
-7.2 Metal / MPS
-Buffer	Access	Threadgroup size
-SynapsePacked	read-only	256
-NeuronTimes	read-write	256
-RNG State	private per-thread	1
+```cpp
 
-Kernel sketch:
+#define NUM_INPUTS  256
+#define NUM_OUTPUTS 256
+#define NUM_HIDDEN 5'000'000
+#define NUM_SYN    1'000'000'000 // This will require ~32G, use fewer synapses depending on your memory availability.
 
-metal
-Copy
+#define INPUT_SIN_WAVE_FREQUENCY 0.5
+
+#define INPUT_RATE_HZ 1000
+#define PEAK_DECAY 0.999f         // how quickly old peaks fade
+#define EVENTS_PER_PASS 150'000'000
+#define FILTER_TAU 0.02
+#define USE_FIR true
+#define dT_SEC 0.0009
+
+#define _aLTP 0.04f
+#define _aLTD 0.02f
+#define _wMin 0.001f
+#define _wMax 1.0f
+
+```
+brain.metal includes the following constants:
+
+```cpp
+/* ------------- build-time knobs --------------------------- */
+#define BASE_SCALE     0.8f      /* p = w² · BASE_SCALE                 */
+#define REFRACTORY      2u       /* dst silent window [ticks]           */
+#define WINDOW_PRE      5u       /* pre spike valid window              */
+#define MAX_SPIKES    128u       /* global budget per kernel pass       */
+#define CLOCK_INC       1u       /* add per synapse                     */
+
+#define TARGET_RATE_HZ 1000.0f   /* homeostatic set-point               */
+#define ETA_HOME      1.0e-6f    /* homeostasis learning rate           */
+#define ETA_REWARD    1.0e-3f    /* reward modulation scale             */
+#define ALPHA_RBAR    0.001f     /* EWMA for running reward average     */
+```
+
+---
+
+## 7. Parallel Execution Strategy
+
+### 7.1 CPU Prototype
+
+* Sharded Monte Carlo loops on `std::thread` pools.
+* Lock-free atomic fetch-add for `NOW_NS`.
+
+### 7.2 Metal / MPS
+
+| Buffer          | Access     | Threadgroup size |
+| --------------- | ---------- | ---------------- |
+| `SynapsePacked` | read-only  | 256              |
+| `NeuronTimes`   | read-write | 256              |
+| `rngState`      | private    | 1                |
+
+**Kernel sketch:**
+
+```metal
 kernel void monteCarloTraversal(
-    device SynapsePacked* syns     [[buffer(0)]],
-    device uint64_t*      lastF    [[buffer(1)]],
-    device uint64_t*      lastV    [[buffer(2)]],
-    device atomic_uint64_t& nowNS  [[buffer(3)]],
-    uint gid [[thread_position_in_grid]]
+    device SynapsePacked*    syns      [[buffer(0)]],
+    device uint64_t*         lastF     [[buffer(1)]],
+    device uint64_t*         lastV     [[buffer(2)]],
+    device atomic_uint64_t&  nowNS     [[buffer(3)]],
+    uint                     gid       [[thread_position_in_grid]]
 ){
     uint edgeIdx = pcg32(&rngState) % N_SYN;
-    SynapsePacked s = syns[edgeIdx];
+    auto s = syns[edgeIdx];
     ...
+    atomic_fetch_add_explicit(&nowNS, ΔT_EVENT, memory_order_relaxed);
 }
-• Atomic increments on a single 64-bit nowNS avoid race conditions.
-• For very large graphs, launch many tiny kernels instead of one monolith—avoids long GPU fences.
+```
 
-8 Pseudocode API (C++-17)
-cpp
-Copy
+* Atomic increments avoid races on the global clock.
+* For huge graphs, launch many smaller kernels to reduce GPU fence times.
+
+---
+
+## 8. Pseudocode API (C++17)
+
+```cpp
 struct GraphBNN {
     uint32_t N_SYN, N_NRN;
     std::vector<uint32_t> src, dst;
@@ -154,34 +227,53 @@ struct GraphBNN {
     void fire(uint32_t edgeIdx, uint32_t src, uint32_t dst);
     bool shouldFire(uint32_t edgeIdx, uint32_t src, uint32_t dst);
 };
-step() wraps the loop from §4; expose it to Python via pybind11 for quick experiments.
+```
 
-9 I/O & Serialization
-File	Format	Notes
-.bnn	Raw binary as per §2	Small header + 4 arrays
-.yaml	Human-editable hyper-parameters	Optional; embed SHA-256 of YAML in .bnn footer for provenance
+* `step()` runs the Monte Carlo loop.
+* Expose via `pybind11` for rapid prototyping.
 
-10 Testing & Validation
-Unit – Deterministic RNG seeds yield identical weight trajectories.
+---
 
-Statistical – Weight distribution over time converges to log-normal.
+## 9. I/O & Serialization
 
-Biological – Pairwise spike correlation obeys experimentally observed 10 ms window (see Bi & Poo 1998).
+| File    | Format | Notes                                                   |
+| ------- | ------ | ------------------------------------------------------- |
+| `.bnn`  | Binary | Header + flat arrays (see §2)                           |
 
-Performance – >10 M synaptic events / s on Apple M3 Ultra (Metal).
+---
 
-11 Extensibility Road-Map
-Stage	Feature	Rationale
-v0.2	Multiple neurotransmitter types (excitatory / inhibitory)	Balance network activity
-v0.3	Short-term facilitation / depression	Model vesicle depletion
-v0.4	Neuromodulators (dopamine)	Reward-modulated STDP
-v0.5	Structural plasticity on GPU	Real-time growth / pruning
+## 10. Testing & Validation (WIP)
 
-12 Glossary
-Symbol	Meaning
-τ_LTP, τ_LTD	Time constants for Long-Term Potentiation / Depression
-α_LTP, α_LTD	Learning rates
-NOW_NS	Global virtual nanosecond clock
-ΔT_EVENT	Clock increment per Monte-Carlo step
+* **Unit tests:** Fixed RNG seeds produce identical weight trajectories.
+* **Statistical:** Weight distributions converge to log-normal.
+* **Biological:** Pairwise spike correlations match 10 ms STDP windows (Bi & Poo 1998).
+* **Performance:** ~15M synaptic events/sec on Apple M3 Ultra (Metal).
 
+Running the project will currently learn sine→cos² mapping for an input and target signal that phase shifts temporally:
+
+<img width="556" alt="image" src="https://github.com/user-attachments/assets/70e74a1d-74e1-44cc-b65b-efa28ec8f82d" />
+
+---
+
+## 11. Extensibility Roadmap
+
+| Version | Feature                            | Rationale                        |
+| ------- | ---------------------------------- | -------------------------------- |
+| v0.2    | Excitatory/Inhibitory neurons      | Balance network dynamics         |
+| v0.3    | Short-term facilitation/depression | Model vesicle depletion          |
+| v0.4    | Dopaminergic neuromodulation       | Reward-modulated STDP            |
+| v0.5    | Structural plasticity on GPU       | Real-time synapse growth/pruning |
+
+---
+
+## 12. Glossary
+
+| Symbol         | Meaning                                                     |
+| -------------- | ----------------------------------------------------------- |
+| τ\_LTP, τ\_LTD | Time constants for Long-Term Potentiation / Depression (ns) |
+| α\_LTP, α\_LTD | STDP learning rates                                         |
+| NOW\_NS        | Global virtual-time nanosecond clock                        |
+| ΔT\_EVENT      | Clock increment per Monte-Carlo step (ns)                   |
+
+---
 
