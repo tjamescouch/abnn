@@ -134,7 +134,7 @@ theta = clamp(weights[edgeIdx], w_min, w_max)
 2. Generate connectivity (Erdős–Rényi or small-world).
 3. Initialize `weights` \~ Beta(2,8) (skewed low).
 4. Zero `lastFiredNS` and `lastVisitedNS`.
-5. constants.h defines hyperparameters:
+5. constants.h defines CPU side hyperparameters:
 
 ```cpp
 
@@ -157,6 +157,21 @@ theta = clamp(weights[edgeIdx], w_min, w_max)
 #define _wMin 0.001f
 #define _wMax 1.0f
 
+```
+brain.metal includes the following constants:
+
+```cpp
+/* ------------- build-time knobs --------------------------- */
+#define BASE_SCALE     0.8f      /* p = w² · BASE_SCALE                 */
+#define REFRACTORY      2u       /* dst silent window [ticks]           */
+#define WINDOW_PRE      5u       /* pre spike valid window              */
+#define MAX_SPIKES    128u       /* global budget per kernel pass       */
+#define CLOCK_INC       1u       /* add per synapse                     */
+
+#define TARGET_RATE_HZ 1000.0f   /* homeostatic set-point               */
+#define ETA_HOME      1.0e-6f    /* homeostasis learning rate           */
+#define ETA_REWARD    1.0e-3f    /* reward modulation scale             */
+#define ALPHA_RBAR    0.001f     /* EWMA for running reward average     */
 ```
 
 ---
@@ -235,6 +250,7 @@ struct GraphBNN {
 * **Performance:** >10M synaptic events/sec on Apple M3 Ultra (Metal).
 
 Running the project will currently learn sine→cos² mapping for an input and target signal that phase shifts temporally:
+
 <img width="556" alt="image" src="https://github.com/user-attachments/assets/70e74a1d-74e1-44cc-b65b-efa28ec8f82d" />
 
 ---
