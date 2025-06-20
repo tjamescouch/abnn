@@ -141,7 +141,7 @@ theta = clamp(weights[edgeIdx], w_min, w_max)
 #define NUM_INPUTS  256
 #define NUM_OUTPUTS 256
 #define NUM_HIDDEN 5'000'000
-#define NUM_SYN    1'000'000'000
+#define NUM_SYN    1'000'000'000 // This will require ~32G, use fewer synapses depending on your memory availability.
 
 #define INPUT_SIN_WAVE_FREQUENCY 0.5
 
