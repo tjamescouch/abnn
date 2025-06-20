@@ -111,7 +111,9 @@ std::vector<bool> BrainEngine::run_one_pass()
     
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
     
-    auto in = stim_->next();
+    auto in = stim_->nextInput();
+    auto expected = stim_->nextExpected();
+    
     brain_->inject_inputs(in, INPUT_RATE_HZ);
 
     //–– Poisson teacher forcing: pTeach = in[o] * teacherRate
@@ -121,13 +123,15 @@ std::vector<bool> BrainEngine::run_one_pass()
     uint32_t* lf  = (uint32_t*)brain_->last_fired_buffer()->contents();
     uint32_t  now = *(uint32_t*)brain_->clock_buffer()->contents();
 
-    float teacherRate = 1.f;      // adjust so average teacher spikes ~20% of ticks
+    static bool even = false;
+    float teacherRate = even ? 1.0f : .0f;
     for (uint32_t o = 0; o < nOut_; ++o) {
-        float p = in[o] * teacherRate;
+        float p = expected[o] * teacherRate;
         if (uni(rng) < p && (now - lf[nIn_ + o] > 1)) {
             lf[nIn_ + o] = now;    // inject a “teacher” spike
         }
     }
+    even = !even;
 
     auto cb=commandQueue_->commandBuffer();
 
@@ -169,7 +173,7 @@ std::vector<bool> BrainEngine::run_one_pass()
     if(winPos_==WIN_SIZE_) {
         double loss = 0.0;
         for (uint32_t i = 0; i < nOut_; ++i) {
-            double err = smoothRate[i] - in[i];
+            double err = smoothRate[i] - expected[i];
             loss += err * err;
         }
         loss /= nOut_;

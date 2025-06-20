@@ -23,7 +23,10 @@ public:
     virtual ~StimulusProvider() = default;
 
     /* Return the next input frame (length = BrainEngine::nIn_) */
-    virtual std::vector<float> next() = 0;
+    virtual std::vector<float> nextInput() = 0;
+    
+    /* Return the next expected output frame (length = BrainEngine::nOut_) */
+    virtual std::vector<float> nextExpected() = 0;
 
     /* Current time of the stimulus in seconds (monotonic) */
     virtual double time() const = 0;

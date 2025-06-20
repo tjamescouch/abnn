@@ -31,8 +31,15 @@ ViewDelegate::ViewDelegate(MTL::Device* pDevice)
 
     auto stim = std::make_shared<FunctionalDataset>(
                     /*nInput=*/NUM_INPUTS,
+                                NUM_OUTPUTS,
                     /*dtSec =*/ dT_SEC,//dt,
-                    /*freqHz=*/INPUT_SIN_WAVE_FREQUENCY);
+                    /*freqHz=*/INPUT_SIN_WAVE_FREQUENCY,
+                                                    [](float x){
+                                                        return cos(x) * cos(x);
+                                                    },
+                                                    [](float x){
+                                                        return 0.5f * sin(x) + 0.5f;
+                                                    });
     _pBrainEngine->set_stimulus(stim);
     _pBrainEngine->start_async();
 

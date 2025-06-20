@@ -15,7 +15,7 @@ public:
 
     /* loss tracking */
     void accumulate_loss(double loss);
-    void flush_loss();             /* prints EMA */
+    void flush();             /* prints EMA & resets output matlab file */
 
 private:
     int  nIn_, nOut_;

@@ -4,12 +4,13 @@
 #include <numeric>
 
 namespace fs = std::filesystem;
+const std::string filename = "abnn_session.m";
 
 /* ctor: open session file, write header */
 Logger::Logger(int nIn, int nOut)
 : nIn_(nIn), nOut_(nOut)
 {
-    fs::path p = fs::current_path() / "abnn_session.m";
+    fs::path p = fs::current_path() / filename;
     mat_.open(p, std::ios::trunc);
     if (!mat_)
         std::cerr << "❌ cannot open " << p << '\n';
@@ -61,10 +62,20 @@ void Logger::accumulate_loss(double loss)
     else         ema_ = beta_*ema_ + (1.0-beta_)*loss;
     ++step_;
 
-    if(step_ % 4 == 0) flush_loss();
+    if(step_ % 4 == 0) flush();
 }
 
-void Logger::flush_loss()
+void Logger::flush()
 {
     std::cout << "✨ EMA-Loss: " << ema_ << '\n';
+    
+    mat_.flush();
+    mat_.close();
+    
+    fs::path p = fs::current_path() / filename;
+    mat_.open(p, std::ios::trunc);
+    if (!mat_)
+        std::cerr << "❌ cannot open " << p << '\n';
+    else
+        mat_ << "% ABNN animated session\n";
 }

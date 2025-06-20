@@ -7,23 +7,26 @@
 #include <vector>
 #include "stimulus-provider.h"
 
-/* Returns a 0‒1 sine wave of length nInput_ whose phase advances dtSec_
-   seconds each call (continuous animation). */
+
 class FunctionalDataset : public StimulusProvider
 {
 public:
-    FunctionalDataset(uint32_t nInput,
-                      double   dtSec,
-                      double   freqHz);
+    FunctionalDataset(uint32_t nInput, uint32_t nOutput, double dtSec, double freqHz, std::function<float(float)> funcInput, std::function<float(float)> funcExpected);
 
-    std::vector<float> next();   /* one frame of stimulus */
-    double             time() const { return tSec_; }
+    std::vector<float> nextInput() override;   /* one frame of stimulus */
+    std::vector<float> nextExpected() override;   /* one frame of stimulus */
+    double             time() const override { return tSec_; }
+
 
 private:
-    std::vector<float> v;
     uint32_t nInput_;
+    uint32_t nOutput_;
+    
     double   dt_;        /* seconds per pass            */
+    double   tSec_;      /* stimulus time in seconds    */
     double   fHz_;       /* sine frequency in Hz        */
     double   phase_;     /* 0‒1 fractional phase        */
-    double   tSec_;      /* stimulus time in seconds    */
+    
+    std::function<float(float)> funcInput_;
+    std::function<float(float)> funcExpected_;
 };
