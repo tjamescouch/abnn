@@ -1,4 +1,4 @@
-# ABNN: Reward-Modulated Spiking Neural Network
+<img width="556" alt="image" src="https://github.com/user-attachments/assets/f8edbb8b-3ede-46c7-b029-ee17777390e7" /># ABNN: Reward-Modulated Spiking Neural Network
 
 A biologically inspired, stochastic spiking neural network implemented in modern C++ (C++17) and Metal. ABNN uses event-driven Monte Carlo traversal, STDP, homeostatic plasticity, and reward modulation to learn arbitrary functional mappings.
 
@@ -224,7 +224,6 @@ struct GraphBNN {
 | File    | Format | Notes                                                   |
 | ------- | ------ | ------------------------------------------------------- |
 | `.bnn`  | Binary | Header + flat arrays (see §2)                           |
-| `.yaml` | YAML   | Human-editable hyperparameters; embed SHA-256 in footer |
 
 ---
 
@@ -234,6 +233,9 @@ struct GraphBNN {
 * **Statistical:** Weight distributions converge to log-normal.
 * **Biological:** Pairwise spike correlations match 10 ms STDP windows (Bi & Poo 1998).
 * **Performance:** >10M synaptic events/sec on Apple M3 Ultra (Metal).
+
+Running the project will currently learn sine→cos² mapping for an input and target signal that phase shifts temporally:
+<img width="556" alt="image" src="https://github.com/user-attachments/assets/70e74a1d-74e1-44cc-b65b-efa28ec8f82d" />
 
 ---
 
