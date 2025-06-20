@@ -247,7 +247,7 @@ struct GraphBNN {
 * **Unit tests:** Fixed RNG seeds produce identical weight trajectories.
 * **Statistical:** Weight distributions converge to log-normal.
 * **Biological:** Pairwise spike correlations match 10 ms STDP windows (Bi & Poo 1998).
-* **Performance:** >10M synaptic events/sec on Apple M3 Ultra (Metal).
+* **Performance:** ~3M synaptic events/sec on Apple M3 Ultra (Metal).
 
 Running the project will currently learn sine→cos² mapping for an input and target signal that phase shifts temporally:
 
