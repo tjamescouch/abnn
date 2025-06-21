@@ -78,7 +78,7 @@ private:
     /* sliding-window loss state --------------------------------------- */
     std::vector<uint32_t> spikeWindow_;   /* counts per output neuron   */
     size_t winPos_{0};
-    const size_t WIN_SIZE_ = 1000;        /* 1000 passes ≈ 1 s          */
+    const size_t WIN_SIZE_ = 1000;
 
     double lastLoss_{0.25};               /* baseline for graded reward */
     RateFilter rateFilter_{ /*τ=*/FILTER_TAU, /*useFIR=*/USE_FIR };

@@ -27,27 +27,44 @@ static fs::path bundle_resource(const std::string& f){
     char exe[PATH_MAX]; uint32_t n=sizeof(exe); _NSGetExecutablePath(exe,&n);
     return fs::canonical(exe).parent_path().parent_path()/ "Resources"/f;}
 
+inline int clamp(float x, float min, float max) {
+    if (x > max) return max;
+    if (x < min) return min;
+    return x;
+}
+
+inline double max(double x, double y) {
+    return x > y ? x : y;
+}
+
 /* random graph --------------------------------------------------------- */
 static void build_random_graph(Brain& b)
 {
-    std::mt19937 gen(1);
-    std::uniform_real_distribution<float> wIn(0.4f,0.8f),
+    static std::mt19937 gen(1);
+    static std::uniform_real_distribution<float> wIn(0.4f,0.8f),
                                           wHH(0.1f,0.2f);
 
     auto* syn = reinterpret_cast<SynapsePacked*>(b.synapse_buffer()->contents());
-    uint32_t idx=0,max=b.n_syn();
+    uint64_t idx=0,max=b.n_syn();
 
     /* dense input→output */
-    for(uint32_t i=0;i<b.n_input() && idx<max;++i)
-        for(uint32_t o=0;o<b.n_output() && idx<max;++o)
+    for(uint32_t i=0;i<b.n_input() && idx<max;++i) {
+        std::cout << ".";
+        for(uint32_t o=0;o<b.n_output() && idx<max;++o) {
             syn[idx++] = { i, b.n_input()+o, wIn(gen), 0.f };
+        }
+    }
+    std::cout << "X";
 
     /* sparse hidden */
     std::uniform_int_distribution<uint32_t> hid(
         b.n_input()+b.n_output(), b.n_neuron()-1);
 
-    while(idx<max)
+    while(idx<max) {
+        if (idx % 1000000 == 0)
+            std::cout << 100 * idx / max << "%" << std::endl;
         syn[idx++] = { hid(gen), hid(gen), wHH(gen), 0.f };
+    }
 
     b.synapse_buffer()->didModifyRange(NS::Range(0,max*sizeof(SynapsePacked)));
 }
@@ -123,15 +140,14 @@ std::vector<bool> BrainEngine::run_one_pass()
     uint32_t* lf  = (uint32_t*)brain_->last_fired_buffer()->contents();
     uint32_t  now = *(uint32_t*)brain_->clock_buffer()->contents();
 
-    static bool even = false;
-    float teacherRate = even ? 1.0f : .0f;
+
+    static float teacherRate = 1.0;
     for (uint32_t o = 0; o < nOut_; ++o) {
         float p = expected[o] * teacherRate;
         if (uni(rng) < p && (now - lf[nIn_ + o] > 1)) {
             lf[nIn_ + o] = now;    // inject a “teacher” spike
         }
     }
-    even = !even;
 
     auto cb=commandQueue_->commandBuffer();
 
@@ -178,11 +194,31 @@ std::vector<bool> BrainEngine::run_one_pass()
         }
         loss /= nOut_;
         float* r=(float*)brain_->reward_buffer()->contents();
-        *r = float(lastLoss_ - loss);
+        
+        float delta = (lastLoss_ - loss);                 // signed improvement
+        float scale = 2.0f;                               // base gain (tune)
+        float tRate = std::max(teacherRate, 0.3f);        // don’t blow up below 0.3
+        float rVal  = scale * delta / tRate;              // gentle amplification
+
+        /* clip to ±0.02 so a single pass can’t wipe weights */
+        rVal = std::clamp(rVal, -0.02f, 0.02f);
+        
+        *r = rVal;
         brain_->reward_buffer()->didModifyRange(NS::Range(0,4));
         lastLoss_=loss;
         logger_->accumulate_loss(loss);
         winPos_=0;
+        std::cout << "🧑‍🏫 Teacher rate: " << teacherRate << std::endl;
+        
+        static double emaLoss_ = loss;
+        double beta_ = 0.98;
+        static double bestLoss = 0;
+        bestLoss = max(bestLoss, loss);
+        
+        emaLoss_ = beta_*emaLoss_ + (1.0-beta_)*loss;
+        
+        if (emaLoss_ < bestLoss * 1.15f)          // only decay when stable
+            teacherRate = std::max(teacherRate * 0.9995f, 0.05f);
     }
     
     pool->release();

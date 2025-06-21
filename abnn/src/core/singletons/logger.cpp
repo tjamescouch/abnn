@@ -4,7 +4,8 @@
 #include <numeric>
 
 namespace fs = std::filesystem;
-const std::string filename = "abnn_session.m";
+const std::string filename      = "abnn_pass_in_progress.m";
+const std::string finalFilename = "abnn_pass.m";
 
 /* ctor: open session file, write header */
 Logger::Logger(int nIn, int nOut)
@@ -70,12 +71,29 @@ void Logger::accumulate_loss(double loss)
 
 void Logger::flush()
 {
-    std::cout << "📈 Truncating output graph file" << '\n';
-    
     mat_.flush();
     mat_.close();
     
     fs::path p = fs::current_path() / filename;
+    fs::path finalPath =  fs::current_path() / finalFilename;
+    
+    if (fs::exists(p)) {
+        try {
+            // Remove old backup if it exists
+            if (fs::exists(finalPath)) {
+                fs::remove(finalPath);
+            }
+            
+            // Move current file to backup
+            fs::rename(p, finalFilename);
+            std::cout << "📁 Moved existing file to " << finalPath.filename() << '\n';
+        }
+        catch (const fs::filesystem_error& ex) {
+            std::cerr << "⚠️  Warning: Could not backup existing file: " << ex.what() << '\n';
+            // Continue anyway - will truncate the existing file
+        }
+    }
+    
     mat_.open(p, std::ios::trunc);
     if (!mat_)
         std::cerr << "❌ cannot open " << p << '\n';
