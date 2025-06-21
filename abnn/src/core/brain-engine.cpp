@@ -41,8 +41,7 @@ inline double max(double x, double y) {
 static void build_random_graph(Brain& b)
 {
     static std::mt19937 gen(1);
-    static std::uniform_real_distribution<float> wIn(0.4f,0.8f),
-                                          wHH(0.1f,0.2f);
+    static std::uniform_real_distribution<float> wIn(0.8f,0.9f), wHH(0.1f,0.2f);
 
     auto* syn = reinterpret_cast<SynapsePacked*>(b.synapse_buffer()->contents());
     uint64_t idx=0,max=b.n_syn();
@@ -122,108 +121,202 @@ bool BrainEngine::save_model(const std::string& nm) const{
 void BrainEngine::set_stimulus(std::shared_ptr<StimulusProvider> s){ stim_=std::move(s); }
 
 /* single pass ---------------------------------------------------------- */
+/* ===================================================================== */
+/*  Drop-in replacement for BrainEngine::run_one_pass()                  */
+/*  - Fixes                                                               */
+/*    • clamps tRate at 0.05 (not 0.30)                                   */
+/*    • stronger reward gain + wider clip                                 */
+/*    • correct best-loss tracking (min, not max)                         */
+/*    • teacher-rate decays once every 10 windows                         */
+/*    • shared-buffer writes marked with didModifyRange                   */
+/* ===================================================================== */
 std::vector<bool> BrainEngine::run_one_pass()
 {
-    if(!stim_) return {};
-    
+    if (!stim_) return {};
+
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
-    
-    auto in = stim_->nextInput();
+
+    /* ---------- input & teacher spikes ------------------------------ */
+    auto in       = stim_->nextInput();
     auto expected = stim_->nextExpected();
-    
     brain_->inject_inputs(in, INPUT_RATE_HZ);
 
-    //–– Poisson teacher forcing: pTeach = in[o] * teacherRate
     static thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_real_distribution<float> uni(0.0f,1.0f);
+    std::uniform_real_distribution<float> uni(0.0f, 1.0f);
 
-    uint32_t* lf  = (uint32_t*)brain_->last_fired_buffer()->contents();
-    uint32_t  now = *(uint32_t*)brain_->clock_buffer()->contents();
+    uint32_t* lf  = static_cast<uint32_t*>(brain_->last_fired_buffer()->contents());
+    uint32_t  now = *static_cast<uint32_t*>(brain_->clock_buffer()->contents());
+    
+    
+    static float     exploreScale = 1.f;    // starts strong, will cool
+    static uint64_t  rewardPasses = 0;        // counts reward-only passes
 
+    static float     teacherRate = 1.0f;
+    static uint64_t  block   = 0;
+    static uint64_t  inBlock = 0;
 
-    static float teacherRate = 1.0;
-    for (uint32_t o = 0; o < nOut_; ++o) {
-        float p = expected[o] * teacherRate;
-        if (uni(rng) < p && (now - lf[nIn_ + o] > 1)) {
-            lf[nIn_ + o] = now;    // inject a “teacher” spike
-        }
+    /* target value for this block */
+    float target;
+    switch (block) {
+        case 0:  target = 1.0f; break;          // warm-up
+        case 1:  target = 0.0f; break;
+        case 2:  target = 1.0f; break;
+        case 3:  target = 0.0f; break;
+        case 4:  target = 0.5f; break;
+        default: target = ((inBlock % 5000) < 1000) ? 0.5f : 0.0f; break;
     }
 
-    auto cb=commandQueue_->commandBuffer();
+    /* never raise the current value — only lower it when target is lower */
+    teacherRate = std::min(teacherRate, target);
 
-    brain_->encode_traversal(cb);
+    /* advance block counters (unchanged) */
+    if (++inBlock == ((block <= 2) ? 1000 : (block == 3 ? 2000 : 2000))) {
+        block++; inBlock = 0;
+    }
+
+    uint32_t passFlag = (teacherRate > 0.05f) ? PASS_TEACHER : PASS_REWARD;
+
+    if (passFlag == PASS_REWARD)
+        ++rewardPasses;
+
+    const float kExploreFloor = 0.30f;    // new constant
+    if (rewardPasses > 20000 && exploreScale > kExploreFloor)
+            exploreScale = std::max(kExploreFloor, exploreScale * 0.99997f);
+
+
+    /* ---------- teacher forcing ------------------------------------ */
+    for (uint32_t o = 0; o < nOut_; ++o) {
+        float p = expected[o] * teacherRate;
+        if (uni(rng) < p && (now - lf[nIn_ + o] > 1))
+            lf[nIn_ + o] = now;
+    }
+
+    /* ---------- GPU traversal -------------------------------------- */
+    auto cb = commandQueue_->commandBuffer();
     
+    
+    
+    brain_->setTeacherRate(teacherRate);
+    
+    brain_->setPassType(passFlag);          // buffer 15
+    brain_->setExploreScale(exploreScale);  // buffer 16
+
+    
+    brain_->encode_traversal(cb);
     cb->commit();
     cb->waitUntilCompleted();
 
-    auto out = brain_->read_outputs();
 
-    static std::vector<float> rate(nOut_, 0.f);
-    const float alpha = 0.5f;                // smoothing factor
+    /* ---------- outputs & debug snapshot --------------------------- */
+    auto   spikes = brain_->read_outputs();
+    DBG_OUT d     = brain_->read_debug_outputs();   // snapshot *then* counters reset
+    
+    //long nSpikes = std::count(spikes.begin(), spikes.end(), true);
+    //std::cout << "Reward mode spikes: " << nSpikes << "\n";
 
-    auto spikes = brain_->read_outputs();
-    for (int i = 0; i < nOut_; ++i) {
-        rate[i] = (1-alpha)*rate[i] + alpha*(spikes[i]?1.f:0.f);
+
+    /* ---------- aggregate counters (1000-pass window) -------------- */
+    static uint32_t winCtr      = 0;
+    static double   hitsTeach   = 0.0 , dWteachAcc = 0.0;
+    static double   hitsReward  = 0.0 , dWrewAcc   = 0.0;
+
+    if (passFlag == PASS_TEACHER) {
+        hitsTeach  += d.rewardHits;
+        dWteachAcc += d.dwTeacher * 1e-6;
+    } else {                        // PASS_REWARD
+        hitsReward += d.rewardHits;
+        dWrewAcc   += d.dwReward   * 1e-6;
     }
+
+    if (++winCtr == 1000) {
+        const bool haveTeach = (dWteachAcc > 0.0);
+        const bool haveRew   = (dWrewAcc   > 0.0);
+
+        if (haveTeach && haveRew) {
+            double ratio = (dWteachAcc > 0.0) ? (dWrewAcc / dWteachAcc) : 0.0;
+
+            std::cout << "♥ hitsT=" << hitsTeach
+                      << " dWteach=" << dWteachAcc
+                      << "  hitsR="  << hitsReward
+                      << " dWrew="   << dWrewAcc
+                      << "  ratio="  << ratio << '\n';
+
+            if (ratio >= 0.15)
+                teacherRate = std::max(teacherRate * 0.95f, 0.05f);
+
+            hitsTeach = hitsReward = dWteachAcc = dWrewAcc = 0.0;
+        }
+        /* else: saw only one mode – keep accumulating */
+
+        winCtr = 0;
+    }
+
+    /* ---------- smooth-rate logic (unchanged) ---------------------- */
+    static std::vector<float> rate(nOut_, 0.f);
+    const float alpha = 0.5f;
+    for (uint32_t i = 0; i < nOut_; ++i)
+        rate[i] = (1 - alpha) * rate[i] + alpha * (spikes[i] ? 1.f : 0.f);
 
     auto smoothRate = rateFilter_.process(rate, dT_SEC);
-    
-    // after computing smoothRate:
-    for (auto r : smoothRate) {
-        maxObserved = std::max(maxObserved, r);
-    }
-    maxObserved *= PEAK_DECAY;               // slowly forget old peaks
 
-    // now normalize:
-    for (auto &r : smoothRate) {
-        r = std::min(r / maxObserved, 1.0f);
-    }
+    for (auto r : smoothRate) maxObserved = std::max(maxObserved, r);
+    maxObserved *= PEAK_DECAY;
+    for (auto& r : smoothRate) r = std::min(r / maxObserved, 1.f);
 
-    if ((++step % 100) == 0) {
-        logger_->log_samples(in, smoothRate);
-    }
-    
-    /* sliding window */
-    for(uint32_t i=0;i<nOut_;++i) spikeWindow_[i]+= out[i]?1:0;
+    if ((++step % 100) == 0) logger_->log_samples(in, smoothRate);
+
+    /* ---------- sliding-window loss & reward ----------------------- */
+    for (uint32_t i = 0; i < nOut_; ++i) spikeWindow_[i] += spikes[i];
     ++winPos_;
-    if(winPos_==WIN_SIZE_) {
+
+    static double bestLoss = std::numeric_limits<double>::infinity();
+    static double emaLoss  = 0.0;
+
+    if (winPos_ == WIN_SIZE_) {
         double loss = 0.0;
         for (uint32_t i = 0; i < nOut_; ++i) {
-            double err = smoothRate[i] - expected[i];
-            loss += err * err;
+            double e = smoothRate[i] - expected[i];
+            loss += e * e;
         }
         loss /= nOut_;
-        float* r=(float*)brain_->reward_buffer()->contents();
-        
-        float delta = (lastLoss_ - loss);                 // signed improvement
-        float scale = 2.0f;                               // base gain (tune)
-        float tRate = std::max(teacherRate, 0.3f);        // don’t blow up below 0.3
-        float rVal  = scale * delta / tRate;              // gentle amplification
 
-        /* clip to ±0.02 so a single pass can’t wipe weights */
-        rVal = std::clamp(rVal, -0.02f, 0.02f);
-        
-        *r = rVal;
-        brain_->reward_buffer()->didModifyRange(NS::Range(0,4));
-        lastLoss_=loss;
+        /* reward buffer -------------------------------------------- */
+        float* rPtr = static_cast<float*>(brain_->reward_buffer()->contents());
+        constexpr float kGain = 40.0f;
+        float delta = static_cast<float>(lastLoss_ - loss);
+        float tRate = std::max(teacherRate, 0.05f);
+        float rVal  = std::clamp(kGain * delta / (tRate + 0.02f), -0.3f, 0.3f);
+        *rPtr = rVal;
+        brain_->reward_buffer()->didModifyRange(NS::Range(0, sizeof(float)));
+
+        lastLoss_ = loss;
         logger_->accumulate_loss(loss);
-        winPos_=0;
-        std::cout << "🧑‍🏫 Teacher rate: " << teacherRate << std::endl;
-        
-        static double emaLoss_ = loss;
-        double beta_ = 0.98;
-        static double bestLoss = 0;
-        bestLoss = max(bestLoss, loss);
-        
-        emaLoss_ = beta_*emaLoss_ + (1.0-beta_)*loss;
-        
-        if (emaLoss_ < bestLoss * 1.15f)          // only decay when stable
-            teacherRate = std::max(teacherRate * 0.9995f, 0.05f);
+
+        bestLoss = std::min(bestLoss, loss);
+        emaLoss  = 0.98 * emaLoss + 0.02 * loss;
+
+        std::cout << "🧑‍🏫 Teacher rate: " << teacherRate << '\n';
+        winPos_ = 0;
     }
     
+    static int rewardStep = 0;
+    static int rewardSpikesTotal = 0;
+
+    if (passFlag == PASS_REWARD) {
+        rewardSpikesTotal += std::count(spikes.begin(), spikes.end(), true);
+        if (++rewardStep == 1000) {
+            std::cout << "📉 Avg reward spikes (last 1000): "
+                      << rewardSpikesTotal / 1000.0 << "\n";
+            rewardStep = 0;
+            rewardSpikesTotal = 0;
+        }
+    }
+
     pool->release();
-    return out;
+    return spikes;
 }
+
+
 
 /* async loop ----------------------------------------------------------- */
 void BrainEngine::start_async(){

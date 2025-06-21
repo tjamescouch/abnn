@@ -7,6 +7,7 @@
 #include <cstring>
 #include <random>
 #include <cmath>
+#include <iostream>
 
 #include "constants.h"
 
@@ -16,13 +17,20 @@ template<typename T> static void rel(T*& p){ if(p){ p->release(); p=nullptr; } }
 std::mt19937 rng(std::random_device{}());
 std::uniform_real_distribution<float> uni(0.f,1.f);
 
+struct DBG { std::atomic<uint32_t>
+    rewardHits,
+    dwTeacher,
+    dwReward;
+    uint _pad;
+};
+
 /* ===================================================================== */
 /* ctor / dtor                                                           */
 Brain::Brain(uint32_t nIn,uint32_t nOut,uint32_t nHid,
              uint32_t nSyn,uint32_t events)
 : N_INPUT_(nIn), N_OUTPUT_(nOut), N_HIDDEN_(nHid),
   N_NRN_(nIn+nOut+nHid), N_SYN_(nSyn), EVENTS_(events),
-  hostSyn_(nSyn)
+  hostSyn_(nSyn), exploreScale_(0.30f) 
 {}
 Brain::~Brain(){ release_all(); }
 
@@ -58,10 +66,13 @@ void Brain::build_buffers(MTL::Device* d)
     bufBudget_    = d->newBuffer(sizeof(uint32_t),             MTL::ResourceStorageModeManaged);
     bufReward_    = d->newBuffer(sizeof(float),                MTL::ResourceStorageModeManaged);
     bufRBar_      = d->newBuffer(sizeof(float),                MTL::ResourceStorageModeShared);
+    bufDebug_     = d->newBuffer(sizeof(DBG),                  MTL::ResourceStorageModeShared);
 
     std::memset(bufSyn_->contents(),       0, bufSyn_->length());
     std::memset(bufLastFire_->contents(),  0, bufLastFire_->length());
     std::memset(bufLastVisit_->contents(), 0, bufLastVisit_->length());
+    std::memset(bufDebug_->contents(), 0, sizeof(DBG));
+    
     *static_cast<uint32_t*>(bufClock_->contents())  = 0;
     *static_cast<uint32_t*>(bufBudget_->contents()) = kMaxSpikes;
     *static_cast<float*>   (bufReward_->contents()) = 0.0f;
@@ -99,7 +110,7 @@ void Brain::encode_traversal(MTL::CommandBuffer* cb)
     enc->setBuffer(bufClock_,     0, 3);
     enc->setBytes (&N_SYN_, sizeof(uint32_t), 4);
 
-    uint32_t tauVis=50'000, tauPre=50'000;
+    uint32_t tauVis=2'000, tauPre=4'000;
     enc->setBytes(&tauVis,sizeof(uint32_t),5);
     enc->setBytes(&tauPre,sizeof(uint32_t),6);
 
@@ -112,6 +123,11 @@ void Brain::encode_traversal(MTL::CommandBuffer* cb)
     enc->setBuffer(bufBudget_, 0, 11);
     enc->setBuffer(bufReward_, 0, 12);
     enc->setBuffer(bufRBar_,   0, 13);
+    enc->setBuffer(bufDebug_,  0, 14);
+    enc->setBytes(&passType_,sizeof(uint32_t),15);
+    enc->setBytes(&exploreScale_,sizeof(float),16);
+    enc->setBytes (&N_INPUT_,      sizeof(uint32_t), 17);
+    enc->setBytes (&N_OUTPUT_,     sizeof(uint32_t), 18);
 
     const uint tg=256;
     enc->dispatchThreads(MTL::Size(((EVENTS_+tg-1)/tg)*tg,1,1),
@@ -143,7 +159,7 @@ void Brain::renormalise_if_needed(MTL::CommandBuffer* cb)
 /* ===================================================================== */
 /* read output spikes (bool vector)                                      */
 std::vector<bool> Brain::read_outputs() const
-{
+{    
     std::vector<bool> out(N_OUTPUT_,false);
     const uint32_t* lf = static_cast<const uint32_t*>(bufLastFire_->contents());
     uint32_t now = *static_cast<const uint32_t*>(bufClock_->contents());
@@ -155,6 +171,32 @@ std::vector<bool> Brain::read_outputs() const
     }
     return out;
 }
+
+DBG_OUT Brain::read_debug_outputs()
+{
+    auto* dc = reinterpret_cast<DBG*>(bufDebug_->contents());
+
+    /* snapshot BEFORE reset */
+    DBG_OUT out{ dc->rewardHits, dc->dwTeacher, dc->dwReward };
+
+    /* print once per 1000 passes */
+    static uint32_t printCtr = 0;
+    if (++printCtr == 1000) {
+        float dWT = out.dwTeacher * 1e-6f;
+        float dWR = out.dwReward  * 1e-6f;
+        std::cout << "hits="   << out.rewardHits
+                  << "  dWteach=" << dWT
+                  << "  dWrew="   << dWR;
+        if (dWT > 0.f) std::cout << "  ratio=" << dWR / dWT;
+        std::cout << '\n';
+        printCtr = 0;
+    }
+
+    /* reset counters for next window */
+    dc->rewardHits = dc->dwTeacher = dc->dwReward = 0;
+    return out;             // returns the *pre-reset* snapshot ✅
+}
+
 
 /* ===================================================================== */
 /* persistence                                                           */

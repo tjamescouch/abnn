@@ -19,6 +19,16 @@ static constexpr uint32_t kMaxSpikes    = 2560;        /* exploration budget */
 static constexpr uint32_t kRenormThresh = 4'000'000; /* renorm every 4 M   */
 
 struct SynapsePacked { uint32_t src, dst; float w, pad; };
+struct DBG_OUT {
+    uint32_t rewardHits, dwTeacher, dwReward;
+};
+
+enum PassType : uint32_t
+{
+    PASS_TEACHER = 0,
+    PASS_REWARD  = 1
+};
+
 
 /* ===================================================================== */
 class Brain
@@ -39,6 +49,8 @@ public:
     void encode_traversal(MTL::CommandBuffer*);
     void inject_inputs(const std::vector<float>& vals, float hz);
     std::vector<bool> read_outputs() const;
+    
+    DBG_OUT read_debug_outputs();
 
     /* persistence */
     void save(std::ostream&) const;
@@ -56,6 +68,10 @@ public:
     MTL::Buffer* clock_buffer()       const { return bufClock_;     }
     MTL::Buffer* reward_buffer()      const { return bufReward_;    }
     MTL::Buffer* budget_buffer()      const { return bufBudget_;    }
+    
+    void setTeacherRate(double teacherRate) {teacherRate_ = teacherRate;}
+    void setExploreScale(double exploreScale) { exploreScale_ = exploreScale; }
+    void setPassType(uint32_t passType) { passType_ = passType; }
 
 private:
     void release_all();
@@ -64,6 +80,11 @@ private:
     /* immutable sizes */
     const uint32_t N_INPUT_, N_OUTPUT_, N_HIDDEN_;
     const uint32_t N_NRN_,   N_SYN_,    EVENTS_;
+    
+    uint32_t passType_ = PASS_TEACHER;
+    
+    double teacherRate_;
+    float exploreScale_ = 0.30f;
 
     /* Metal buffers */
     MTL::Buffer *bufSyn_       {nullptr};
@@ -73,6 +94,7 @@ private:
     MTL::Buffer *bufBudget_    {nullptr};
     MTL::Buffer *bufReward_    {nullptr};
     MTL::Buffer *bufRBar_      {nullptr};
+    MTL::Buffer *bufDebug_     {nullptr};
 
     /* pipelines */
     MTL::ComputePipelineState *pipeTrav_{nullptr};

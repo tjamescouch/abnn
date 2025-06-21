@@ -33,7 +33,7 @@ std::vector<float> FunctionalDataset::nextInput()
     for (uint32_t i = 0; i < nInput_; ++i) {
         double x = static_cast<double>(i) / nInput_;           /* 0‒1 */
         float s = funcInput_((float)(2.0 * M_PI * (x + phase_)));
-        v[i] = s;//static_cast<float>(0.5 * (s + 1.0));            /* 0‒1 */
+        v[i] = s;
     }
     return v;
 }
@@ -46,7 +46,7 @@ std::vector<float> FunctionalDataset::nextExpected()
     for (uint32_t i = 0; i < nOutput_; ++i) {
         double x = static_cast<double>(i) / nOutput_;           /* 0‒1 */
         double s = funcExpected_(2.0 * M_PI * (x + phase_));
-        v[i] = s;//static_cast<float>(0.5 * (s + 1.0));            /* 0‒1 */
+        v[i] = s;
     }
     return v;
 }

@@ -50,6 +50,7 @@ public:
     bool  load_model(const std::string& filename = "");
     bool  save_model(const std::string& filename = "") const;
 
+
 private:
     float maxObserved = 0.5f;     // initialize to expected plateau
 
